@@ -13,10 +13,13 @@ trackers = []
 # Loop through and test each tracker
 for tracker in old:
     # protocol parser
-    if tracker.startswith("http://"):
+    appends = False
+    if tracker.startswith("http://") or tracker.startswith("https://"):
         appends = check_tracker.http(tracker)
     elif tracker.startswith("udp://"):
         appends = check_tracker.udp(tracker)
+    if appends:
+        trackers.append(tracker)
 
 # Final list of active trackers
 print("\n🧲 Active Trackers List:")
