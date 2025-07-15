@@ -3,7 +3,6 @@ import struct
 import random
 import socket
 from urllib.parse import urlparse
-import urllib.parse
 
 
 class check_tracker:
