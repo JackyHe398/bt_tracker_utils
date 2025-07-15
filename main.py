@@ -1,27 +1,41 @@
 from check_tracker import check_tracker
+import threading
+
+
+def threaded_check(url):
+    if url.startswith("http"):
+        result = check_tracker.http(url)
+    elif url.startswith("udp"):
+        result = check_tracker.udp(url)
+    else:
+        print(f"❌ Unsupported scheme: {url}")
+        result = False
+    results[url] = result
 
 # Set of tracker URLs to check
-old = set()
+urls = set()
 with open("trackers.txt", "r") as f:
     for line in f:
         line = line.strip()
         if line and not line.startswith("#"):  # Ignore empty lines and comments
-            old.add(line)
-# List to store confirmed active trackers
-trackers = []
+            urls.add(line)
 
-# Loop through and test each tracker
-for tracker in old:
-    # protocol parser
-    appends = False
-    if tracker.startswith("http://") or tracker.startswith("https://"):
-        appends = check_tracker.http(tracker)
-    elif tracker.startswith("udp://"):
-        appends = check_tracker.udp(tracker)
-    if appends:
-        trackers.append(tracker)
+
+trackers = []
+results = {}
+threads = []
+
+for url in urls:
+    t = threading.Thread(target=threaded_check, args=(url,))
+    t.start()
+    threads.append(t)
+
+for t in threads:
+    t.join()
+
 
 # Final list of active trackers
-print("\n🧲 Active Trackers List:")
-for t in trackers:
-    print(t)
+print("\n\n\n🧲 Active Trackers List:")
+for url, status in results.items():
+    if status:
+        print(url)
