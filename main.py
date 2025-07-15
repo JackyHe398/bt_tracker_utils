@@ -11,15 +11,15 @@ class check_tracker:
         Check if a given HTTP URL is reachable and returns a status code.
         """
         try:
-            response = requests.get(tracker, headers=headers, timeout=5)
+            response = requests.get(url, headers=headers, timeout=5)
             sc = response.status_code
             if sc == 200 or sc == 400 or sc == 406:
-                print(f"✅ Active: {tracker}")
+                print(f"✅ Active: {url}")
                 return True
             else:
-                print(f"⚠️ Responded but not 200: {tracker} ({response.status_code})")
+                print(f"⚠️ Responded but not 200: {url} ({response.status_code})")
         except requests.exceptions.RequestException as e:
-            print(f"❌ Error: {tracker} - {e}")
+            print(f"❌ Error: {url} - {e}")
         return False
 
     def udp(url: str) -> bool:
