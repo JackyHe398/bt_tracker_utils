@@ -3,6 +3,7 @@ import struct
 import random
 import socket
 from urllib.parse import urlparse
+import urllib.parse
 
 
 class check_tracker:
@@ -10,21 +11,45 @@ class check_tracker:
         """
         Check if a given HTTP URL is reachable and returns a status code.
         """
+        info_hash_hex = '8a19577fb5f690970ca43a57ff1011ae202244b8'
+        info_hash_bytes = bytes.fromhex(info_hash_hex)
+
         headers = {
             "User-Agent": "qBittorrent/4.5.2",  # Mimic a known client
             "Accept": "*/*",
             "Connection": "close"
-            }
+        }
+
+        params = {
+            'info_hash': info_hash_bytes,
+            'peer_id': '-robots-testing12345',
+            'left': '0',
+            'port': '6881',
+            'downloaded': '0',
+            'uploaded': '0',
+            'event': 'stopped',
+        }
+
         try:
-            response = requests.get(url, headers=headers, timeout=5)
+            response = requests.get(url,
+                                    headers=headers,
+                                    params=params,
+                                    allow_redirects=True,
+                                    timeout=5)
             sc = response.status_code
-            if sc == 200 or sc == 400 or sc == 406:
+            if sc == 200:
                 print(f"✅ {url}: Active")
+                return True
+            elif sc == 400: 
+                print(f"⚠️ {url}: Active, (400) Bad Request")
                 return True
             else:
                 print(f"⚠️ Responded but not valid: {url} ({response.status_code})")
+                return False
+        except requests.exceptions.Timeout as e:
+            print(f"❌ {url}: Timeout - {e}")
         except requests.exceptions.RequestException as e:
-            print(f"❌ Error: {url} - {e}")
+            print(f"❌ {url}: Unexpected error - {e}")
         return False
 
     def udp(url: str) -> bool:
