@@ -2,21 +2,26 @@ import requests
 import struct
 import random
 import socket
-import bencode as bec
+import bencodepy as bec
 from typing import Dict, Any
 from urllib.parse import urlparse
 import TrackerQueryException as TQError
 
 
 class query:
-    def http(url: str) -> Dict[str, Any]:
+    def http(url: str,
+            info_hash: str,
+            peer_id: str,  
+            event: str, 
+            left = 0, downloaded = 0, uploaded = 0, 
+            port:int = 6881, headers = None ) -> Dict[str, Any]:
         """
         Check if a given HTTP URL is reachable and returns a status code.
         """
-        info_hash_hex = '8a19577fb5f690970ca43a57ff1011ae202244b8'
-        info_hash_bytes = bytes.fromhex(info_hash_hex)
+        # example_hash = '8a19577fb5f690970ca43a57ff1011ae202244b8'
+        info_hash_bytes = bytes.fromhex(info_hash)
 
-        headers = {
+        headers = headers or {
             "User-Agent": "qBittorrent/4.5.2",  # Mimic a known client
             "Accept": "*/*",
             "Connection": "close"
@@ -24,12 +29,12 @@ class query:
 
         params = {
             'info_hash': info_hash_bytes,
-            'peer_id': '-robots-testing12345',
-            'left': '0',
-            'port': '6881',
-            'downloaded': '0',
-            'uploaded': '0',
-            'event': 'stopped',
+            'peer_id': peer_id,
+            'port': str(port),
+            'left': str(left or 0),
+            'downloaded': str(downloaded or 0),
+            'uploaded': str(uploaded or 0),
+            'event': event,
         }
 
         try:
