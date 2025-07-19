@@ -2,6 +2,7 @@ import requests
 import struct
 import random
 import socket
+from bencodepy import decode as bdecode, exceptions as bexceptions
 from urllib.parse import urlparse
 
 
@@ -38,18 +39,24 @@ class check_tracker:
             sc = response.status_code
             if sc == 200:
                 print(f"✅ {url}: Active")
-                return True
             elif sc == 400: 
                 print(f"⚠️ {url}: Active, (400) Bad Request")
-                return True
+                return False
             else:
                 print(f"⚠️ Responded but not valid: {url} ({response.status_code})")
                 return False
         except requests.exceptions.Timeout as e:
             print(f"❌ {url}: Timeout - {e}")
+            return False
         except requests.exceptions.RequestException as e:
             print(f"❌ {url}: Unexpected error - {e}")
-        return False
+            return False
+        try: 
+            bdecode(response.text)
+        except bexceptions.BencodeDecodeError as e:
+            print(f"❌ {url}: Invalid response format - {e}")
+            return False
+        
 
     def udp(url: str) -> bool:
         def response_validator(response, id)-> bool:
