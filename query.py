@@ -10,6 +10,36 @@ import TrackerQueryException as TQError
 # example_hash = '8a19577fb5f690970ca43a57ff1011ae202244b8'
 # example_peer_id = '-robots-testing12345'
 
+def udp_response_parser(response: bytes) -> Dict[str, Any]:
+    def get_peer_from_bytes(response: bytes, result: list[str] = []) -> list[str]:
+        """
+        Extracts peer information from the UDP response.
+        """
+        if len(response) <6:
+            return result
+        peer_bytes = response[:6]
+        ip_packed, port = struct.unpack("!4sH", peer_bytes)
+        ip = socket.inet_ntoa(ip_packed)
+        result.append((ip, port))
+        return get_peer_from_bytes(response[6:], result)
+
+
+    """
+    Parses the UDP response from the tracker.
+    """
+    result = {}
+
+    header = response[:20]
+    peer_bytes = response[20:]
+
+    action, transaction_id, result["interval"], result["leechers"], result["seeder"] = struct.unpack("!iiiii", header)
+    if action != 1 and transaction_id != 0:
+        raise TQError.InvalidResponseError(message="Invalid action or transaction ID")
+    
+    result["peers"] = get_peer_from_bytes(peer_bytes)
+    return result
+
+
 class Query:
     def http(url: str,
             info_hash: str,
@@ -126,13 +156,14 @@ class Query:
             s.sendto(packet, (HOSTNAME, PORT))
             response, addr = s.recvfrom(1024)  # buffer size can be adjusted
             # endregion
-            return bec.decode(response.text)
         except socket.timeout:
             raise TQError.TimeoutError(url=url)
         except socket.error as e:
             raise TQError.UnexpectedError(url=url, e=e)
         finally:
             s.close()
+        
+        return udp_response_parser(response)
 
 def query(url: str,
             info_hash: str,
