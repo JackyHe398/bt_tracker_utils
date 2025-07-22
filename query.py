@@ -129,7 +129,7 @@ class Query:
                                     timeout=5)
             status_code = response.status_code//100*100  # Get the first digit of the status code
             if status_code == 200:
-                response_bdecode = bec.decode(response.content)
+                response_bdecode = dict(bec.decode(response.content))
                 response_bdecode[b"peers"] = _get_peer_from_bytes(response_bdecode[b"peers"])
                 if b"peers6" in response_bdecode:
                     response_bdecode[b"peers6"] = _get_peer6_from_bytes(response_bdecode[b"peers6"])

@@ -51,7 +51,7 @@ class CheckTracker:
             try: 
                 bdecode(response.content)
                 return True
-            except bexceptions.BencodeDecodeError as e:
+            except bexceptions.DecodingError as e:
                 print(f"❌ {url}: Invalid response format - {e}")
                 return False
         elif sc == 400: 
