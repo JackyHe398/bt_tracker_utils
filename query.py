@@ -17,7 +17,7 @@ class TrackerEvent(Enum):
     STOPPED = 3
 
 
-def _get_peer_from_bytes(response: bytes, result: list[str] = []) -> list[str]:
+def _get_peer_from_bytes(response: bytes, result: list[tuple] = []) -> list[tuple]:
     """
     Extracts peer information from the UDP response.
     """
@@ -29,7 +29,7 @@ def _get_peer_from_bytes(response: bytes, result: list[str] = []) -> list[str]:
     result.append((ip, port))
     return _get_peer_from_bytes(response[6:], result)
 
-def _get_peer6_from_bytes(response: bytes, result: list[str] = []) -> list[str]:
+def _get_peer6_from_bytes(response: bytes, result: list[tuple] = []) -> list[tuple]:
     """
     Extracts peer information from the UDP response for IPv6.
     """
@@ -87,14 +87,15 @@ def _format_result(result: Dict[str, Any]) -> Dict[str, Any]:
 
 
 class Query:
+    @staticmethod
     def http(url: str,
             info_hash: str,
             peer_id: str,
             event: str,
             left: int = 0, downloaded: int = 0, uploaded: int = 0,
-            ip_addr: str = None,
-            num_want: int = None, key: int = 0,
-            port: int = 6881, headers: dict = None) -> Dict[str, Any]:
+            ip_addr: str|None = None,
+            num_want: int|None = None, key: int = 0,
+            port: int = 6881, headers: dict|None = None) -> Dict[str, Any]:
         """
         Check if a given HTTP URL is reachable and returns a status code.
         """
@@ -146,6 +147,7 @@ class Query:
             raise TQError.UnexpectedError(url=url, e=e)
 
 
+    @staticmethod
     def udp(url: str,
             info_hash: str,
             peer_id: str,
@@ -153,7 +155,7 @@ class Query:
             left: int = 0, downloaded: int = 0, uploaded: int = 0,
             ip_addr: str = "0.0.0.0",
             num_want: int = 50, key: int = 0,
-            port: int = 6881) -> bool:
+            port: int = 6881)  -> Dict[str, Any]:
         def initializing_validator(response) -> Dict[str, Any]:
             """
             Validates the response from the tracker during initialization.
@@ -222,14 +224,14 @@ class Query:
 def query(url: str,
             info_hash: str,
             peer_id: str,  
-            event: int, 
+            event: TrackerEvent, 
             left = 0, downloaded = 0, uploaded = 0, 
-            ip_addr:str = None,
+            ip_addr: str|None = None,
             num_want = None, key = None,
-            port:int = None, headers = None ) -> Dict[str, Any]:
-    
+            port: int|None = None, headers = None ) -> Dict[str, Any]:
+
     # region - arguement preparing
-    args = {
+    args: Dict[str, Any] = {
         "url": url,
         "info_hash": info_hash,
         "peer_id": peer_id,

@@ -8,6 +8,7 @@ from collections.abc import Iterable
 
 
 class CheckTracker:
+    @staticmethod
     def http(url: str) -> bool:
         """
         Check if a given HTTP URL is reachable and returns a status code.
@@ -48,7 +49,7 @@ class CheckTracker:
         if sc == 200:
             print(f"✅ {url}: Active")
             try: 
-                bdecode(response.text)
+                bdecode(response.content)
                 return True
             except bexceptions.BencodeDecodeError as e:
                 print(f"❌ {url}: Invalid response format - {e}")
@@ -60,6 +61,7 @@ class CheckTracker:
             print(f"⚠️ Responded but not valid: {url} ({response.status_code})")
             return False
 
+    @staticmethod
     def udp(url: str) -> bool:
         def response_validator(response, id)-> bool:
             action, transaction_id, connection_id = struct.unpack("!iiq", response[:16])
