@@ -14,7 +14,7 @@ This is a utility library for checking tracker status and querying tracker in di
 ## Installation
 
 ```
-pip install bt_tracker_utils
+pip install bt-tracker-utils
 ```
 
 ## Usage Example - Check status
@@ -105,10 +105,12 @@ def query(url: str,
 The query function returns a dictionary containing the following. Note that values can be `None`(for required fields) or not present(for optional fields) if the response does not contain that field:
 
 #### Optional fields:
+
 - `failure reason`: If this field is present, all the other fields will not exist.
 - `warning message`: This field do not affect the other fields.
 
 #### Required fields:
+
 - `interval`: The interval in seconds for the next query.
 - `min interval`: The minimum interval in seconds for the next query, query should not be made more frequently than this.
 - `leechers`: The number of peers currently downloading the torrent.
@@ -117,6 +119,7 @@ The query function returns a dictionary containing the following. Note that valu
 - `peers6`: A list of tuple, storing (ip, port) for each peer in IPv6 format.
 
 ## Error Handling
+
 The library raises specific exceptions for different error conditions:
 
 ```python
@@ -131,19 +134,27 @@ except Exception as e:
 ```
 
 ### Exception Types
+
 - `TimeoutError`: Request timed out
-- `BadRequestError`: Invalid request parameters  
+- `BadRequestError`: Invalid request parameters
 - `InvalidResponseError`: Malformed tracker response
 - `UnexpectedError`: Network or other unexpected errors
 
 ## References and Further Reading
+
 [Wikipedia](https://en.wikipedia.org/wiki/BitTorrent_tracker)
+
 [CSDN](https://blog.csdn.net/zyd_15221378768/article/details/79785075)
+
 [Theory Wiki](https://wiki.theory.org/BitTorrent_Tracker_Protocol)
+
 [Concurrency Deep Dives](https://concurrencydeepdives.com/udp-tracker-protocol/)
+
 [XBTT](https://xbtt.sourceforge.net/udp_tracker_protocol.html)
 
+
 ## License
+
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 Created by JackyHe398 © 2025
