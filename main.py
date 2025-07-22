@@ -1,17 +1,19 @@
 from check_tracker import check_tracker
-import threading
 from collections.abc import Iterable
+import threading
 
-def check_trackers(urls: Iterable):
+def check_trackers(urls: Iterable, max_threads=50):
+    semaphore = threading.Semaphore(max_threads)
     def threaded_check(url):
-        if url.startswith("http"):
-            result = check_tracker.http(url)
-        elif url.startswith("udp"):
-            result = check_tracker.udp(url)
-        else:
-            print(f"❌ Unsupported scheme: {url}")
-            result = False
-        results[url] = result
+        with semaphore:
+            if url.startswith("http"):
+                result = check_tracker.http(url)
+            elif url.startswith("udp"):
+                result = check_tracker.udp(url)
+            else:
+                print(f"❌ Unsupported scheme: {url}")
+                result = False
+            results[url] = result
 
     results = {}
     threads = []
