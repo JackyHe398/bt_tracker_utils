@@ -16,3 +16,6 @@ setup(
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown"
 )
+
+# python setup.py sdist bdist_wheel
+# twine upload dist/*
