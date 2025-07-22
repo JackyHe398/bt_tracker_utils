@@ -2,6 +2,7 @@ import requests
 import struct
 import random
 import socket
+from enum import Enum
 import bencodepy as bec
 from typing import Dict, Any
 from urllib.parse import urlparse
@@ -9,21 +10,39 @@ import TrackerQueryException as TQError
 
 # example_hash = '8a19577fb5f690970ca43a57ff1011ae202244b8'
 # example_peer_id = '-robots-testing12345'
-
-def udp_response_parser(response: bytes) -> Dict[str, Any]:
-    def get_peer_from_bytes(response: bytes, result: list[str] = []) -> list[str]:
-        """
-        Extracts peer information from the UDP response.
-        """
-        if len(response) <6:
-            return result
-        peer_bytes = response[:6]
-        ip_packed, port = struct.unpack("!4sH", peer_bytes)
-        ip = socket.inet_ntoa(ip_packed)
-        result.append((ip, port))
-        return get_peer_from_bytes(response[6:], result)
+class TrackerEvent(Enum):
+    NONE = 0
+    COMPLETED = 1
+    STARTED = 2
+    STOPPED = 3
 
 
+def _get_peer_from_bytes(response: bytes, result: list[str] = []) -> list[str]:
+    """
+    Extracts peer information from the UDP response.
+    """
+    if len(response) <6:
+        return result
+    peer_bytes = response[:6]
+    ip_packed, port = struct.unpack("!4sH", peer_bytes)
+    ip = socket.inet_ntoa(ip_packed)
+    result.append((ip, port))
+    return _get_peer_from_bytes(response[6:], result)
+
+def _get_peer6_from_bytes(response: bytes, result: list[str] = []) -> list[str]:
+    """
+    Extracts peer information from the UDP response for IPv6.
+    """
+    if len(response) < 18:
+        return result
+    peer_bytes = response[:18]
+    ip_packed, port = struct.unpack("!16sH", peer_bytes)
+    ip = socket.inet_ntop(socket.AF_INET6, ip_packed)
+    result.append((ip, port))
+    return _get_peer6_from_bytes(response[18:], result)
+
+
+def _udp_response_parser(response: bytes) -> Dict[str, Any]:
     """
     Parses the UDP response from the tracker.
     """
@@ -34,21 +53,48 @@ def udp_response_parser(response: bytes) -> Dict[str, Any]:
 
     action, transaction_id, result["interval"], result["leechers"], result["seeder"] = struct.unpack("!iiiii", header)
     if action != 1 and transaction_id != 0:
-        raise TQError.InvalidResponseError(message="Invalid action or transaction ID")
-    
-    result["peers"] = get_peer_from_bytes(peer_bytes)
+        raise TQError.InvalidResponseError(message=f"Invalid action or transaction ID, action id: {action}, transaction id: {transaction_id}")
+
+    result["peers"] = _get_peer_from_bytes(peer_bytes)
     return result
+
+def _format_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Formats the result from the tracker query into a human-readable string.
+    """
+
+    if "failure reason" in result:
+        return result 
+    formatted = {
+        "interval": None,
+        "min interval": None,
+        "leechers": None,
+        "seeders": None,
+        "peers": None,
+        "peers6": None
+    }
+
+    if "complete" in result:
+        formatted["seeders"] = result["complete"]
+        result.pop("complete")
+    if "incomplete" in result:
+        formatted["leechers"] = result["incomplete"]
+        result.pop("incomplete")
+    
+    for key, value in result.items():
+        formatted[key] = value
+    return formatted
 
 
 class Query:
     def http(url: str,
             info_hash: str,
-            peer_id: str,  
-            event: str, 
-            left = 0, downloaded = 0, uploaded = 0,
-            ip_addr:str = None,
-            num_want = 0, key = None,
-            port:int = 6881, headers = None ) -> Dict[str, Any]:
+            peer_id: str,
+            event: str,
+            left: int = 0, downloaded: int = 0, uploaded: int = 0,
+            ip_addr: str = None,
+            num_want: int = None, key: int = 0,
+            port: int = 6881, headers: dict = None) -> Dict[str, Any]:
         """
         Check if a given HTTP URL is reachable and returns a status code.
         """
@@ -70,12 +116,9 @@ class Query:
             'event': event,
         }
 
-        if ip_addr:
-            params['ip'] = ip_addr
-        if num_want > 0:
-            params['numwant'] = str(num_want)
-        if key:
-            params['key'] = str(key)
+        if ip_addr: params['ip'] = ip_addr
+        if num_want: params['numwant'] = str(num_want)
+        if key: params['key'] = str(key)
 
         try:
             response = requests.get(url,
@@ -85,16 +128,19 @@ class Query:
                                     timeout=5)
             status_code = response.status_code//100*100  # Get the first digit of the status code
             if status_code == 200:
-                response_bdecode = bec.decode(response.text)
+                response_bdecode = bec.decode(response.content)
+                response_bdecode[b"peers"] = _get_peer_from_bytes(response_bdecode[b"peers"])
+                if b"peers6" in response_bdecode:
+                    response_bdecode[b"peers6"] = _get_peer6_from_bytes(response_bdecode[b"peers6"])
                 response_decoded = {k.decode(): (v.decode() if isinstance(v, bytes) else v) for k, v in response_bdecode.items()}
-                return response_decoded
+                return _format_result(response_decoded)
             elif status_code == 300:
                 raise TQError.UnexpectedError(url=url, message="Redirection not supported")
             elif status_code == 400:
                 raise TQError.BadRequestError(url=url)
             else:
                 raise TQError.InvalidResponseError(url=url)
-        except requests.exceptions.Timeout as e:
+        except requests.exceptions.Timeout:
             raise TQError.TimeoutError(url=url)
         except requests.exceptions.RequestException as e:
             raise TQError.UnexpectedError(url=url, e=e)
@@ -102,13 +148,13 @@ class Query:
 
     def udp(url: str,
             info_hash: str,
-            peer_id: str,  
-            event: int, 
-            left = 0, downloaded = 0, uploaded = 0, 
-            ip_addr:str = "0.0.0.0",
-            num_want = 50, key = random.randint(0, 0xFFFF),
-            port:int = 6881) -> bool:
-        def initializing_validator(response)-> int:
+            peer_id: str,
+            event: TrackerEvent,
+            left: int = 0, downloaded: int = 0, uploaded: int = 0,
+            ip_addr: str = "0.0.0.0",
+            num_want: int = 50, key: int = 0,
+            port: int = 6881) -> bool:
+        def initializing_validator(response) -> Dict[str, Any]:
             """
             Validates the response from the tracker during initialization.
             """
@@ -137,7 +183,6 @@ class Query:
 
         try:
             # region - initialize connection
-            print("initializing")
             packet = struct.pack("!qii", PROTOCOL_ID, 0, TRANSACTION_ID) # ACTION: connect
             s.sendto(packet, (HOSTNAME, PORT))
             response, addr = s.recvfrom(1024)  # buffer size can be adjusted
@@ -146,7 +191,6 @@ class Query:
             # endregion
 
             # region - query
-            print("querying")
             packet = struct.pack(
                 "!qii20s20sqqqi4siiH",
                 CONNECTION_ID,
@@ -173,41 +217,39 @@ class Query:
         finally:
             s.close()
         
-        return udp_response_parser(response)
+        return _format_result(_udp_response_parser(response))
 
 def query(url: str,
             info_hash: str,
             peer_id: str,  
             event: int, 
             left = 0, downloaded = 0, uploaded = 0, 
-            ip_addr:str = "0.0.0.0",
-            num_want = -1, key = random.randint(0, 0xFFFF),
-            port:int = 6881, headers = None ) -> bool:
+            ip_addr:str = None,
+            num_want = None, key = None,
+            port:int = None, headers = None ) -> Dict[str, Any]:
+    
+    # region - arguement preparing
+    args = {
+        "url": url,
+        "info_hash": info_hash,
+        "peer_id": peer_id,
+    }
+
+    if left is not None: args["left"] = left
+    if downloaded is not None: args["downloaded"] = downloaded
+    if uploaded is not None: args["uploaded"] = uploaded
+    if ip_addr is not None: args["ip_addr"] = ip_addr
+    if num_want is not None: args["num_want"] = num_want
+    if key is not None: args["key"] = key
+    if port is not None: args["port"] = port
+    if headers is not None: args["headers"] = headers
+    # endregion
         
     if url.startswith("http"):
-        return Query.http(url,
-                          info_hash,
-                          peer_id,
-                          event,
-                          left, downloaded, uploaded,
-                          ip_addr, num_want, key,
-                          port, headers)
+        args["event"] = event.name.lower()
+        return Query.http(**args)
     elif url.startswith("udp"):
-        if event == "none":
-            event = 0
-        elif event == "completed":
-            event = 1
-        elif event == "started":
-            event = 2
-        elif event == "stopped":
-            event = 3
-
-        return Query.udp(url,
-                         info_hash,
-                         peer_id,
-                         event,
-                         left, downloaded, uploaded,
-                         ip_addr, num_want, key,
-                         port)
+        args["event"] = event.value
+        return Query.udp(**args)
     else:
         raise TQError.TrackerQueryException(message="Unsupported URL scheme", url=url)
