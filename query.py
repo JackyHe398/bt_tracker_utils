@@ -45,7 +45,9 @@ class Query:
             info_hash: str,
             peer_id: str,  
             event: str, 
-            left = 0, downloaded = 0, uploaded = 0, 
+            left = 0, downloaded = 0, uploaded = 0,
+            ip_addr:str = None,
+            num_want = 0, key = None,
             port:int = 6881, headers = None ) -> Dict[str, Any]:
         """
         Check if a given HTTP URL is reachable and returns a status code.
@@ -68,6 +70,13 @@ class Query:
             'event': event,
         }
 
+        if ip_addr:
+            params['ip'] = ip_addr
+        if num_want > 0:
+            params['numwant'] = str(num_want)
+        if key:
+            params['key'] = str(key)
+
         try:
             response = requests.get(url,
                                     headers=headers,
@@ -76,8 +85,9 @@ class Query:
                                     timeout=5)
             status_code = response.status_code//100*100  # Get the first digit of the status code
             if status_code == 200:
-                response_result = bec.decode(response.text)
-                return response_result
+                response_bdecode = bec.decode(response.text)
+                response_decoded = {k.decode(): (v.decode() if isinstance(v, bytes) else v) for k, v in response_bdecode.items()}
+                return response_decoded
             elif status_code == 300:
                 raise TQError.UnexpectedError(url=url, message="Redirection not supported")
             elif status_code == 400:
@@ -85,7 +95,7 @@ class Query:
             else:
                 raise TQError.InvalidResponseError(url=url)
         except requests.exceptions.Timeout as e:
-            raise TQError.TimeoutError(url=url, e=e)
+            raise TQError.TimeoutError(url=url)
         except requests.exceptions.RequestException as e:
             raise TQError.UnexpectedError(url=url, e=e)
 
@@ -180,6 +190,7 @@ def query(url: str,
                           peer_id,
                           event,
                           left, downloaded, uploaded,
+                          ip_addr, num_want, key,
                           port, headers)
     elif url.startswith("udp"):
         if event == "none":
@@ -194,7 +205,7 @@ def query(url: str,
         return Query.udp(url,
                          info_hash,
                          peer_id,
-                         2,
+                         event,
                          left, downloaded, uploaded,
                          ip_addr, num_want, key,
                          port)
