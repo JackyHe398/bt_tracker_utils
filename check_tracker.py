@@ -4,9 +4,10 @@ import random
 import socket
 from bencodepy import decode as bdecode, exceptions as bexceptions
 from urllib.parse import urlparse
+from collections.abc import Iterable
 
 
-class check_tracker:
+class CheckTracker:
     def http(url: str) -> bool:
         """
         Check if a given HTTP URL is reachable and returns a status code.
@@ -94,3 +95,35 @@ class check_tracker:
             return False
         finally:
             s.close()
+
+def check_trackers(urls: Iterable, max_threads=50):
+    import threading
+    semaphore = threading.Semaphore(max_threads)
+    def threaded_check(url):
+        with semaphore:
+            if url.startswith("http"):
+                result = CheckTracker.http(url)
+            elif url.startswith("udp"):
+                result = CheckTracker.udp(url)
+            else:
+                print(f"❌ Unsupported scheme: {url}")
+                result = False
+            results[url] = result
+
+    results = {}
+    threads = []
+
+    for url in urls:
+        t = threading.Thread(target=threaded_check, args=(url,))
+        t.start()
+        threads.append(t)
+
+    for t in threads:
+        t.join()
+
+
+    # Final list of active trackers
+    print("\n\n\n🧲 Active Trackers List:")
+    for url, status in results.items():
+        if status:
+            print(url)
