@@ -47,7 +47,6 @@ def _get_peer6_from_bytes(response: bytes, result: list[tuple] = []) -> list[tup
     result.append((ip, port))
     return _get_peer6_from_bytes(response[18:], result)
 
-
 def _udp_response_parser(response: bytes) -> Dict[str, Any]:
     """
     Parses the UDP response from the tracker.
@@ -63,6 +62,7 @@ def _udp_response_parser(response: bytes) -> Dict[str, Any]:
 
     result["peers"] = _get_peer_from_bytes(peer_bytes)
     return result
+
 
 def _format_result(result: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -101,7 +101,8 @@ class Query:
             left: int = 0, downloaded: int = 0, uploaded: int = 0,
             ip_addr: str|None = None,
             num_want: int|None = None, key: int = 0,
-            port: int = 6881, headers: dict|None = None) -> Dict[str, Any]:
+            port: int = 6881, headers: dict|None = None,
+            timeout: int = 5) -> Dict[str, Any]:
         """
         Check if a given HTTP URL is reachable and returns a status code.
         """
@@ -132,7 +133,7 @@ class Query:
                                     headers=headers,
                                     params=params,
                                     allow_redirects=True,
-                                    timeout=5)
+                                    timeout=timeout)
             status_code = response.status_code//100*100  # Get the first digit of the status code
             if status_code == 200:
                 response_bdecode = dict(bec.decode(response.content))
@@ -157,11 +158,12 @@ class Query:
     def udp(url: str,
             info_hash: str,
             peer_id: str,
-            event: TrackerEvent,
+            event: TrackerEvent|int,
             left: int = 0, downloaded: int = 0, uploaded: int = 0,
             ip_addr: str = "0.0.0.0",
             num_want: int = 50, key: int = 0,
-            port: int = 6881)  -> Dict[str, Any]:
+            port: int = 6881,
+            timeout: int = 5)  -> Dict[str, Any]:
         def initializing_validator(response) -> Dict[str, Any]:
             """
             Validates the response from the tracker during initialization.
@@ -172,6 +174,9 @@ class Query:
             else:
                 raise InvalidResponseError(url=url)
         
+        if isinstance(event, TrackerEvent):
+            event = event.value
+
         # region - define constants and params
         parsed = urlparse(url)
         HOSTNAME = parsed.hostname
@@ -187,7 +192,7 @@ class Query:
         # Create packet: ! means network byte order (big-endian)
 
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.settimeout(10)  # Optional: wait up to 5 seconds
+        s.settimeout(timeout)
 
         try:
             # region - initialize connection
@@ -234,7 +239,8 @@ def query(url: str,
             left = 0, downloaded = 0, uploaded = 0, 
             ip_addr: str|None = None,
             num_want = None, key = None,
-            port: int|None = None, headers = None ) -> Dict[str, Any]:
+            port: int|None = None, headers = None,
+            timeout: int = 5) -> Dict[str, Any]:
 
     # region - arguement preparing
     args: Dict[str, Any] = {
@@ -251,6 +257,7 @@ def query(url: str,
     if key is not None: args["key"] = key
     if port is not None: args["port"] = port
     if headers is not None: args["headers"] = headers
+    if timeout is not None: args["timeout"] = timeout
     # endregion
         
     if url.startswith("http"):

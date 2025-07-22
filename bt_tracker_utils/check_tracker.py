@@ -9,7 +9,7 @@ from collections.abc import Iterable
 
 class CheckTracker:
     @staticmethod
-    def http(url: str) -> bool:
+    def http(url: str, timeout: int = 5) -> bool:
         """
         Check if a given HTTP URL is reachable and returns a status code.
         """
@@ -37,7 +37,7 @@ class CheckTracker:
                                     headers=headers,
                                     params=params,
                                     allow_redirects=True,
-                                    timeout=5)
+                                    timeout=timeout)
         except requests.exceptions.Timeout as e:
             print(f"❌ {url}: Timeout - {e}")
             return False
@@ -62,7 +62,7 @@ class CheckTracker:
             return False
 
     @staticmethod
-    def udp(url: str) -> bool:
+    def udp(url: str, timeout: int = 5) -> bool:
         def response_validator(response, id)-> bool:
             action, transaction_id, connection_id = struct.unpack("!iiq", response[:16])
             if action == ACTION and transaction_id == id:
@@ -85,7 +85,7 @@ class CheckTracker:
         packet = struct.pack("!qii", PROTOCOL_ID, ACTION, id)
 
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.settimeout(5)  # Optional: wait up to 5 seconds
+        s.settimeout(timeout)  # Optional: wait up to 5 seconds
 
         try:
             s.sendto(packet, (HOSTNAME, PORT))
@@ -98,7 +98,7 @@ class CheckTracker:
         finally:
             s.close()
 
-def check_trackers(urls: Iterable, max_threads=50):
+def check_trackers(urls: Iterable, max_threads=50, timeout: int = 5):
     import threading
     semaphore = threading.Semaphore(max_threads)
     def threaded_check(url):
@@ -124,11 +124,11 @@ def check_trackers(urls: Iterable, max_threads=50):
         if status:
             print(url)
 
-def check_tracker(url: str) -> bool:
+def check_tracker(url: str, timeout: int = 5) -> bool:
     if url.startswith("http"):
-        return CheckTracker.http(url)
+        return CheckTracker.http(url, timeout=timeout)
     elif url.startswith("udp"):
-        return CheckTracker.udp(url)
+        return CheckTracker.udp(url, timeout=timeout)
     else:
         print(f"❌ Unsupported scheme: {url}")
         return False
