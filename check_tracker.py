@@ -36,27 +36,28 @@ class check_tracker:
                                     params=params,
                                     allow_redirects=True,
                                     timeout=5)
-            sc = response.status_code
-            if sc == 200:
-                print(f"✅ {url}: Active")
-            elif sc == 400: 
-                print(f"⚠️ {url}: Active, (400) Bad Request")
-                return False
-            else:
-                print(f"⚠️ Responded but not valid: {url} ({response.status_code})")
-                return False
         except requests.exceptions.Timeout as e:
             print(f"❌ {url}: Timeout - {e}")
             return False
         except requests.exceptions.RequestException as e:
             print(f"❌ {url}: Unexpected error - {e}")
             return False
-        try: 
-            bdecode(response.text)
-        except bexceptions.BencodeDecodeError as e:
-            print(f"❌ {url}: Invalid response format - {e}")
-            return False
         
+        sc = response.status_code
+        if sc == 200:
+            print(f"✅ {url}: Active")
+            try: 
+                bdecode(response.text)
+                return True
+            except bexceptions.BencodeDecodeError as e:
+                print(f"❌ {url}: Invalid response format - {e}")
+                return False
+        elif sc == 400: 
+            print(f"⚠️ {url}: Active, (400) Bad Request")
+            return False
+        else:
+            print(f"⚠️ Responded but not valid: {url} ({response.status_code})")
+            return False
 
     def udp(url: str) -> bool:
         def response_validator(response, id)-> bool:
