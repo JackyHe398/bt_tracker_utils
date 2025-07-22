@@ -1,4 +1,4 @@
-from check_tracker import CheckTracker, check_trackers
+from bt_tracker_utils import CheckTracker, check_trackers
 if __name__ == "__main__":
     # Set of tracker URLs to check
     urls = set()
