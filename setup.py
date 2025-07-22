@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="bt_tracker_utils",
-    version="1.0.0",
+    version="0.1.0",
     author="JackyHe398",
     author_email="hekinghung@gmail.com",
     description="BitTorrent tracker utilities for checking availability and querying",
