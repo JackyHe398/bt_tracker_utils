@@ -97,7 +97,7 @@ class Query:
     def http(url: str,
             info_hash: str,
             peer_id: str,
-            event: str,
+            event: str|TrackerEvent,
             left: int = 0, downloaded: int = 0, uploaded: int = 0,
             ip_addr: str|None = None,
             num_want: int|None = None, key: int = 0,
@@ -106,6 +106,9 @@ class Query:
         """
         Check if a given HTTP URL is reachable and returns a status code.
         """
+        if isinstance(event, TrackerEvent):
+            event = event.name.lower()
+        
         info_hash_bytes = bytes.fromhex(info_hash)
 
         headers = headers or {
