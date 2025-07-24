@@ -97,7 +97,7 @@ class Query:
     def http(url: str,
             info_hash: str,
             peer_id: str,
-            event: str|TrackerEvent,
+            event: TrackerEvent,
             left: int = 0, downloaded: int = 0, uploaded: int = 0,
             ip_addr: str|None = None,
             num_want: int|None = None, key: int = 0,
@@ -106,8 +106,6 @@ class Query:
         """
         Check if a given HTTP URL is reachable and returns a status code.
         """
-        if isinstance(event, TrackerEvent):
-            event = event.name.lower()
         
         info_hash_bytes = bytes.fromhex(info_hash)
 
@@ -124,7 +122,7 @@ class Query:
             'left': str(left or 0),
             'downloaded': str(downloaded or 0),
             'uploaded': str(uploaded or 0),
-            'event': event,
+            'event': event.name.lower(), # Convert TrackerEvent to string
         }
 
         if ip_addr: params['ip'] = ip_addr
@@ -161,7 +159,7 @@ class Query:
     def udp(url: str,
             info_hash: str,
             peer_id: str,
-            event: TrackerEvent|int,
+            event: TrackerEvent,
             left: int = 0, downloaded: int = 0, uploaded: int = 0,
             ip_addr: str = "0.0.0.0",
             num_want: int = 50, key: int = 0,
@@ -176,9 +174,6 @@ class Query:
                 return connection_id
             else:
                 raise InvalidResponseError(url=url)
-        
-        if isinstance(event, TrackerEvent):
-            event = event.value
 
         # region - define constants and params
         parsed = urlparse(url)
@@ -217,7 +212,7 @@ class Query:
                 downloaded or 0,
                 left or 0,
                 uploaded or 0,
-                event,
+                event.value, # Convert TrackerEvent to int
                 ip_bytes,
                 key,
                 num_want,
@@ -238,12 +233,12 @@ class Query:
 def query(url: str,
             info_hash: str,
             peer_id: str,  
-            event: TrackerEvent, 
-            left = 0, downloaded = 0, uploaded = 0, 
+            event: TrackerEvent,
+            left = None, downloaded = None, uploaded = None, 
             ip_addr: str|None = None,
             num_want = None, key = None,
             port: int|None = None, headers = None,
-            timeout: int = 5) -> Dict[str, Any]:
+            timeout: int|None = None) -> Dict[str, Any]:
 
     # region - arguement preparing
     args: Dict[str, Any] = {
