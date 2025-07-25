@@ -91,6 +91,32 @@ def _format_result(result: Dict[str, Any]) -> Dict[str, Any]:
         formatted[key] = value
     return formatted
 
+def _decode_ip(response: dict[bytes, Any]) -> Dict[str, Any]:
+    """
+    Decodes the response from the tracker.
+    """
+
+    response[b"peers"] = _get_peer_from_bytes(response[b"peers"])
+    if b"peers6" in response:
+        response[b"peers6"] = _get_peer6_from_bytes(response[b"peers6"])
+
+
+    response_decoded = {}
+    for k, v in response.items():
+        if b'ip' in k: # if the key contains 'ip', decode with inet_ntoa
+            # Check if it's IPv4 (4 bytes) or IPv6 (16 bytes)
+            if len(response[k]) == 4:
+                v = socket.inet_ntoa(response[k])
+            elif len(response[k]) == 16:
+                v = socket.inet_ntop(socket.AF_INET6, response[k])
+            else:
+                v = response[k]
+        try: 
+            response_decoded[k.decode()] = (v.decode() if isinstance(v, bytes) else v)
+        except:
+            response_decoded[k.decode()] = v
+
+    return response_decoded
 
 class Query:
     @staticmethod
@@ -137,12 +163,9 @@ class Query:
                                     timeout=timeout)
             status_code = response.status_code//100*100  # Get the first digit of the status code
             if status_code == 200:
-                response_bdecode = dict(bec.decode(response.content))
-                response_bdecode[b"peers"] = _get_peer_from_bytes(response_bdecode[b"peers"])
-                if b"peers6" in response_bdecode:
-                    response_bdecode[b"peers6"] = _get_peer6_from_bytes(response_bdecode[b"peers6"])
-                response_decoded = {k.decode(): (v.decode() if isinstance(v, bytes) else v) for k, v in response_bdecode.items()}
-                return _format_result(response_decoded)
+                response_bdecode: dict[bytes, bytes] = dict(bec.decode(response.content))
+                response_decode = _decode_ip(response_bdecode)
+                return _format_result(response_decode)
             elif status_code == 300:
                 raise UnexpectedError(url=url, message="Redirection not supported")
             elif status_code == 400:
