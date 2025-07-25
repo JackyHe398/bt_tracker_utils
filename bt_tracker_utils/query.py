@@ -94,8 +94,8 @@ def _format_result(result: Dict[str, Any]) -> Dict[str, Any]:
 
 class Query:
     @staticmethod
-    def http(url: str,
-            info_hash: str,
+    def http(info_hash: str,
+            url: str,
             peer_id: str,
             event: TrackerEvent,
             left: int = 0, downloaded: int = 0, uploaded: int = 0,
@@ -156,8 +156,8 @@ class Query:
 
 
     @staticmethod
-    def udp(url: str,
-            info_hash: str,
+    def udp(info_hash: str,
+            url: str,
             peer_id: str,
             event: TrackerEvent,
             left: int = 0, downloaded: int = 0, uploaded: int = 0,
@@ -230,8 +230,8 @@ class Query:
         
         return _format_result(_udp_response_parser(response))
 
-def query(url: str,
-            info_hash: str,
+def single(info_hash: str,
+            url: str,
             peer_id: str,  
             event: TrackerEvent,
             left = None, downloaded = None, uploaded = None, 
@@ -242,9 +242,10 @@ def query(url: str,
 
     # region - arguement preparing
     args: Dict[str, Any] = {
-        "url": url,
         "info_hash": info_hash,
+        "url": url,
         "peer_id": peer_id,
+        "event": event,
     }
 
     if left is not None: args["left"] = left
@@ -254,15 +255,13 @@ def query(url: str,
     if num_want is not None: args["num_want"] = num_want
     if key is not None: args["key"] = key
     if port is not None: args["port"] = port
-    if headers is not None: args["headers"] = headers
     if timeout is not None: args["timeout"] = timeout
     # endregion
         
     if url.startswith("http"):
-        args["event"] = event.name.lower()
+        if headers is not None: args["headers"] = headers
         return Query.http(**args)
     elif url.startswith("udp"):
-        args["event"] = event.value
         return Query.udp(**args)
     else:
         raise TrackerQueryException(message="Unsupported URL scheme", url=url)
