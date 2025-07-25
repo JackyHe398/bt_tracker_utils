@@ -230,38 +230,74 @@ class Query:
         
         return _format_result(_udp_response_parser(response))
 
-def single(info_hash: str,
-            url: str,
-            peer_id: str,  
-            event: TrackerEvent,
-            left = None, downloaded = None, uploaded = None, 
-            ip_addr: str|None = None,
-            num_want = None, key = None,
-            port: int|None = None, headers = None,
-            timeout: int|None = None) -> Dict[str, Any]:
+    @staticmethod
+    def single(info_hash: str,
+                url: str,
+                peer_id: str,  
+                event: TrackerEvent,
+                left = None, downloaded = None, uploaded = None, 
+                ip_addr: str|None = None,
+                num_want = None, key = None,
+                port: int|None = None, headers = None,
+                timeout: int|None = None) -> Dict[str, Any]:
 
-    # region - arguement preparing
-    args: Dict[str, Any] = {
-        "info_hash": info_hash,
-        "url": url,
-        "peer_id": peer_id,
-        "event": event,
-    }
+        # region - arguement preparing
+        args: Dict[str, Any] = {
+            "info_hash": info_hash,
+            "url": url,
+            "peer_id": peer_id,
+            "event": event,
+        }
 
-    if left is not None: args["left"] = left
-    if downloaded is not None: args["downloaded"] = downloaded
-    if uploaded is not None: args["uploaded"] = uploaded
-    if ip_addr is not None: args["ip_addr"] = ip_addr
-    if num_want is not None: args["num_want"] = num_want
-    if key is not None: args["key"] = key
-    if port is not None: args["port"] = port
-    if timeout is not None: args["timeout"] = timeout
-    # endregion
+        if left is not None: args["left"] = left
+        if downloaded is not None: args["downloaded"] = downloaded
+        if uploaded is not None: args["uploaded"] = uploaded
+        if ip_addr is not None: args["ip_addr"] = ip_addr
+        if num_want is not None: args["num_want"] = num_want
+        if key is not None: args["key"] = key
+        if port is not None: args["port"] = port
+        if timeout is not None: args["timeout"] = timeout
+        # endregion
+            
+        if url.startswith("http"):
+            if headers is not None: args["headers"] = headers
+            return Query.http(**args)
+        elif url.startswith("udp"):
+            return Query.udp(**args)
+        else:
+            raise TrackerQueryException(message="Unsupported URL scheme", url=url)
+    
+    @staticmethod
+    def multi(info_hash: str,
+                urls: list[str],
+                peer_id: str,  
+                event: TrackerEvent,
+                left = None, downloaded = None, uploaded = None, 
+                ip_addr: str|None = None,
+                num_want = None, key = None,
+                port: int|None = None, headers = None,
+                timeout: int|None = None, max_threads: int = 50) -> Dict[str, Dict[str, Any]]:
+        import threading
+        semaphore = threading.Semaphore(max_threads)
+        result = {}
+        threads = []  # Keep track of threads
         
-    if url.startswith("http"):
-        if headers is not None: args["headers"] = headers
-        return Query.http(**args)
-    elif url.startswith("udp"):
-        return Query.udp(**args)
-    else:
-        raise TrackerQueryException(message="Unsupported URL scheme", url=url)
+        def threaded_check(url):
+            with semaphore:
+                try:
+                    result[url] = Query.single(info_hash, url, peer_id, event,
+                                       left, downloaded, uploaded, ip_addr,
+                                       num_want, key, port, headers, timeout)
+                except Exception as e:
+                    result[url] = {"error": str(e)}  # Store error in result instead of printing
+
+        for url in urls:
+            threaded = threading.Thread(target=threaded_check, args=(url,))
+            threaded.start()
+            threads.append(threaded)  # Keep track of the thread
+        
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join()
+            
+        return result
