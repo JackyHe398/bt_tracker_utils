@@ -6,6 +6,8 @@ from enum import Enum
 import bencodepy as bec
 from typing import Dict, Any
 from urllib.parse import urlparse
+
+from ..TrackerEvent import TrackerEvent
 from .TrackerQueryException import (
     TrackerQueryException,
     TimeoutError,
@@ -16,11 +18,6 @@ from .TrackerQueryException import (
 
 # example_hash = '8a19577fb5f690970ca43a57ff1011ae202244b8'
 # example_peer_id = '-robots-testing12345'
-class TrackerEvent(Enum):
-    NONE = 0
-    COMPLETED = 1
-    STARTED = 2
-    STOPPED = 3
 
 
 def _get_peer_from_bytes(response: bytes, result: list[tuple] = []) -> list[tuple]:

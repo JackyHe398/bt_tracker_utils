@@ -16,7 +16,7 @@
 
 # check_tracker("udp://tracker.torrent.eu.org:451/announce")
 
-from bt_tracker_utils import Query, TrackerEvent, check_trackers
+from bt_tracker_utils import tracker, TrackerEvent
 from random import choice, sample
 
 
@@ -24,7 +24,7 @@ with open("trackers.txt", "r") as f:
     urls = list(line.strip() for line in f if line.strip() and not line.startswith("#"))
 
 
-result = Query.single("b547cdccd2f6248e4d76cb3d7a9012cfe3fee2da", 'https://tracker.ghostchu-services.top:443/announce',
+result = tracker.Query.single("b547cdccd2f6248e4d76cb3d7a9012cfe3fee2da", 'https://tracker.ghostchu-services.top:443/announce',
             "-robots-testing12345",
             TrackerEvent.STOPPED)
 

@@ -7,11 +7,11 @@ from urllib.parse import urlparse
 from collections.abc import Iterable
 
 
-class CheckTracker:
+class Check:
     @staticmethod
     def http(url: str, timeout: int = 5) -> bool:
         """
-        Check if a given HTTP URL is reachable and returns a status code.
+        Check if a given HTTP tracker URL is reachable and returns a status code.
         """
         info_hash_hex = '8a19577fb5f690970ca43a57ff1011ae202244b8'
         info_hash_bytes = bytes.fromhex(info_hash_hex)
@@ -63,6 +63,9 @@ class CheckTracker:
 
     @staticmethod
     def udp(url: str, timeout: int = 5) -> bool:
+        """
+        Check if a given UDP tracker URL is reachable and responds correctly.
+        """
         def response_validator(response, id)-> bool:
             action, transaction_id, connection_id = struct.unpack("!iiq", response[:16])
             if action == ACTION and transaction_id == id:
@@ -98,37 +101,45 @@ class CheckTracker:
         finally:
             s.close()
 
-def check_trackers(urls: Iterable, max_threads=50, timeout: int = 5):
-    import threading
-    semaphore = threading.Semaphore(max_threads)
-    def threaded_check(url):
-        with semaphore:
-            result = check_tracker(url)
-            results[url] = result
+    @staticmethod
+    def auto(url: str, timeout: int = 5) -> bool:
+        """
+        Check tracker URL based on its scheme (http or udp).
+        """
+        if url.startswith("http"):
+            return Check.http(url, timeout=timeout)
+        elif url.startswith("udp"):
+            return Check.udp(url, timeout=timeout)
+        else:
+            print(f"❌ Unsupported scheme: {url}")
+            return False
+        
+    @staticmethod
+    def multiple(urls: Iterable, max_threads=50, timeout: int = 5):
+        """
+        Check multiple tracker status concurrently
+        """
+        import threading
+        semaphore = threading.Semaphore(max_threads)
+        def threaded_check(url):
+            with semaphore:
+                result = Check.auto(url, timeout=timeout)
+                results[url] = result
 
-    results = {}
-    threads = []
+        results = {}
+        threads = []
 
-    for url in urls:
-        t = threading.Thread(target=threaded_check, args=(url,))
-        t.start()
-        threads.append(t)
+        for url in urls:
+            t = threading.Thread(target=threaded_check, args=(url,))
+            t.start()
+            threads.append(t)
 
-    for t in threads:
-        t.join()
+        for t in threads:
+            t.join()
 
 
-    # Final list of active trackers
-    print("\n\n\n🧲 Active Trackers List:")
-    for url, status in results.items():
-        if status:
-            print(url)
-
-def check_tracker(url: str, timeout: int = 5) -> bool:
-    if url.startswith("http"):
-        return CheckTracker.http(url, timeout=timeout)
-    elif url.startswith("udp"):
-        return CheckTracker.udp(url, timeout=timeout)
-    else:
-        print(f"❌ Unsupported scheme: {url}")
-        return False
+        # Final list of active trackers
+        print("\n\n\n🧲 Active Trackers List:")
+        for url, status in results.items():
+            if status:
+                print(url)
