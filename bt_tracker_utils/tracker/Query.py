@@ -2,12 +2,11 @@ import requests
 import struct
 import random
 import socket
-from enum import Enum
 import bencodepy as bec
 from typing import Dict, Any
 from urllib.parse import urlparse
 
-from ..TrackerEvent import TrackerEvent
+from ..Torrent import Torrent, TorrentStatus
 from .TrackerQueryException import (
     TrackerQueryException,
     TimeoutError,
@@ -117,11 +116,9 @@ def _decode_ip(response: dict[bytes, Any]) -> Dict[str, Any]:
 
 class Query:
     @staticmethod
-    def http(info_hash: str,
+    def http(torrent: Torrent,
             url: str,
             peer_id: str,
-            event: TrackerEvent,
-            left: int = 0, downloaded: int = 0, uploaded: int = 0,
             ip_addr: str|None = None,
             num_want: int|None = None, key: int = 0,
             port: int = 6881, headers: dict|None = None,
@@ -130,7 +127,7 @@ class Query:
         Check if a given HTTP URL is reachable and returns a status code.
         """
         
-        info_hash_bytes = bytes.fromhex(info_hash)
+        info_hash_bytes = bytes.fromhex(torrent.info_hash)
 
         headers = headers or {
             "User-Agent": "qBittorrent/4.5.2",  # Mimic a known client
@@ -142,10 +139,10 @@ class Query:
             'info_hash': info_hash_bytes,
             'peer_id': peer_id,
             'port': str(port),
-            'left': str(left or 0),
-            'downloaded': str(downloaded or 0),
-            'uploaded': str(uploaded or 0),
-            'event': event.name.lower(), # Convert TrackerEvent to string
+            'left': str(torrent.left),
+            'downloaded': str(torrent.downloaded),
+            'uploaded': str(torrent.uploaded),
+            'event': torrent.event.name.lower(), # Convert TorrentStatus to string
         }
 
         if ip_addr: params['ip'] = ip_addr
@@ -176,11 +173,9 @@ class Query:
 
 
     @staticmethod
-    def udp(info_hash: str,
+    def udp(torrent: Torrent,
             url: str,
             peer_id: str,
-            event: TrackerEvent,
-            left: int = 0, downloaded: int = 0, uploaded: int = 0,
             ip_addr: str = "0.0.0.0",
             num_want: int = 50, key: int = 0,
             port: int = 6881,
@@ -227,12 +222,12 @@ class Query:
                 CONNECTION_ID,
                 1,  # ACTION: announce
                 TRANSACTION_ID,
-                bytes.fromhex(info_hash),
+                bytes.fromhex(torrent.info_hash),
                 peer_id.encode("utf-8")[:20].ljust(20, b"-"),
-                downloaded or 0,
-                left or 0,
-                uploaded or 0,
-                event.value, # Convert TrackerEvent to int
+                torrent.downloaded,
+                torrent.left,
+                torrent.uploaded,
+                torrent.event.value, # Convert TorrentStatus to int
                 ip_bytes,
                 key,
                 num_want,
@@ -251,11 +246,9 @@ class Query:
         return _format_result(_udp_response_parser(response))
 
     @staticmethod
-    def single(info_hash: str,
+    def single(torrent: Torrent,
                 url: str,
                 peer_id: str,  
-                event: TrackerEvent,
-                left = None, downloaded = None, uploaded = None, 
                 ip_addr: str|None = None,
                 num_want = None, key = None,
                 port: int|None = None, headers = None,
@@ -263,15 +256,11 @@ class Query:
 
         # region - arguement preparing
         args: Dict[str, Any] = {
-            "info_hash": info_hash,
+            "torrent": torrent,
             "url": url,
-            "peer_id": peer_id,
-            "event": event,
+            "peer_id": peer_id
         }
 
-        if left is not None: args["left"] = left
-        if downloaded is not None: args["downloaded"] = downloaded
-        if uploaded is not None: args["uploaded"] = uploaded
         if ip_addr is not None: args["ip_addr"] = ip_addr
         if num_want is not None: args["num_want"] = num_want
         if key is not None: args["key"] = key
@@ -288,11 +277,9 @@ class Query:
             raise TrackerQueryException(message="Unsupported URL scheme", url=url)
     
     @staticmethod
-    def multi(info_hash: str,
+    def multi(torrent: Torrent,
                 urls: list[str],
                 peer_id: str,  
-                event: TrackerEvent,
-                left = None, downloaded = None, uploaded = None, 
                 ip_addr: str|None = None,
                 num_want = None, key = None,
                 port: int|None = None, headers = None,
@@ -305,9 +292,9 @@ class Query:
         def threaded_check(url):
             with semaphore:
                 try:
-                    result[url] = Query.single(info_hash, url, peer_id, event,
-                                       left, downloaded, uploaded, ip_addr,
-                                       num_want, key, port, headers, timeout)
+                    result[url] = Query.single(torrent, url, peer_id,
+                                       ip_addr=ip_addr,
+                                       num_want=num_want, key=key, port=port, headers=headers, timeout=timeout)
                 except Exception as e:
                     result[url] = {"error": str(e)}  # Store error in result instead of printing
 

@@ -6,7 +6,7 @@ A Python library for checking tracker availability and querying tracker informat
 
 from .Check import Check
 from .Query import Query
-from ..TrackerEvent import TrackerEvent
+from ..Torrent import TorrentStatus
 
 __version__ = "1.0.0"
 __author__ = "JackyHe398"
@@ -15,7 +15,7 @@ __description__ = "BitTorrent tracker utilities for checking availability and qu
 
 # Define what gets imported with "from bt_tracker_utils import *"
 __all__ = [
-    "TrackerEvent",
+    "TorrentStatus",
     "Query",
     "Check",
 ]

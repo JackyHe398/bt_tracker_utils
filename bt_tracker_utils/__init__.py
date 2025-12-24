@@ -1,2 +1,2 @@
 from . import tracker
-from .TrackerEvent import TrackerEvent
+from .Torrent import Torrent, TorrentStatus
