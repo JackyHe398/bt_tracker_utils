@@ -91,11 +91,37 @@ def _format_result(result: Dict[str, Any]) -> Dict[str, Any]:
         formatted[key] = value
     return formatted
 
+def _decode_ip(response: dict[bytes, Any]) -> Dict[str, Any]:
+    """
+    Decodes the response from the tracker.
+    """
+
+    response[b"peers"] = _get_peer_from_bytes(response[b"peers"])
+    if b"peers6" in response:
+        response[b"peers6"] = _get_peer6_from_bytes(response[b"peers6"])
+
+
+    response_decoded = {}
+    for k, v in response.items():
+        if b'ip' in k: # if the key contains 'ip', decode with inet_ntoa
+            # Check if it's IPv4 (4 bytes) or IPv6 (16 bytes)
+            if len(response[k]) == 4:
+                v = socket.inet_ntoa(response[k])
+            elif len(response[k]) == 16:
+                v = socket.inet_ntop(socket.AF_INET6, response[k])
+            else:
+                v = response[k]
+        try: 
+            response_decoded[k.decode()] = (v.decode() if isinstance(v, bytes) else v)
+        except:
+            response_decoded[k.decode()] = v
+
+    return response_decoded
 
 class Query:
     @staticmethod
-    def http(url: str,
-            info_hash: str,
+    def http(info_hash: str,
+            url: str,
             peer_id: str,
             event: TrackerEvent,
             left: int = 0, downloaded: int = 0, uploaded: int = 0,
@@ -137,12 +163,9 @@ class Query:
                                     timeout=timeout)
             status_code = response.status_code//100*100  # Get the first digit of the status code
             if status_code == 200:
-                response_bdecode = dict(bec.decode(response.content))
-                response_bdecode[b"peers"] = _get_peer_from_bytes(response_bdecode[b"peers"])
-                if b"peers6" in response_bdecode:
-                    response_bdecode[b"peers6"] = _get_peer6_from_bytes(response_bdecode[b"peers6"])
-                response_decoded = {k.decode(): (v.decode() if isinstance(v, bytes) else v) for k, v in response_bdecode.items()}
-                return _format_result(response_decoded)
+                response_bdecode: dict[bytes, bytes] = dict(bec.decode(response.content))
+                response_decode = _decode_ip(response_bdecode)
+                return _format_result(response_decode)
             elif status_code == 300:
                 raise UnexpectedError(url=url, message="Redirection not supported")
             elif status_code == 400:
@@ -156,8 +179,8 @@ class Query:
 
 
     @staticmethod
-    def udp(url: str,
-            info_hash: str,
+    def udp(info_hash: str,
+            url: str,
             peer_id: str,
             event: TrackerEvent,
             left: int = 0, downloaded: int = 0, uploaded: int = 0,
@@ -230,39 +253,74 @@ class Query:
         
         return _format_result(_udp_response_parser(response))
 
-def query(url: str,
-            info_hash: str,
-            peer_id: str,  
-            event: TrackerEvent,
-            left = None, downloaded = None, uploaded = None, 
-            ip_addr: str|None = None,
-            num_want = None, key = None,
-            port: int|None = None, headers = None,
-            timeout: int|None = None) -> Dict[str, Any]:
+    @staticmethod
+    def single(info_hash: str,
+                url: str,
+                peer_id: str,  
+                event: TrackerEvent,
+                left = None, downloaded = None, uploaded = None, 
+                ip_addr: str|None = None,
+                num_want = None, key = None,
+                port: int|None = None, headers = None,
+                timeout: int|None = None) -> Dict[str, Any]:
 
-    # region - arguement preparing
-    args: Dict[str, Any] = {
-        "url": url,
-        "info_hash": info_hash,
-        "peer_id": peer_id,
-    }
+        # region - arguement preparing
+        args: Dict[str, Any] = {
+            "info_hash": info_hash,
+            "url": url,
+            "peer_id": peer_id,
+            "event": event,
+        }
 
-    if left is not None: args["left"] = left
-    if downloaded is not None: args["downloaded"] = downloaded
-    if uploaded is not None: args["uploaded"] = uploaded
-    if ip_addr is not None: args["ip_addr"] = ip_addr
-    if num_want is not None: args["num_want"] = num_want
-    if key is not None: args["key"] = key
-    if port is not None: args["port"] = port
-    if headers is not None: args["headers"] = headers
-    if timeout is not None: args["timeout"] = timeout
-    # endregion
+        if left is not None: args["left"] = left
+        if downloaded is not None: args["downloaded"] = downloaded
+        if uploaded is not None: args["uploaded"] = uploaded
+        if ip_addr is not None: args["ip_addr"] = ip_addr
+        if num_want is not None: args["num_want"] = num_want
+        if key is not None: args["key"] = key
+        if port is not None: args["port"] = port
+        if timeout is not None: args["timeout"] = timeout
+        # endregion
+            
+        if url.startswith("http"):
+            if headers is not None: args["headers"] = headers
+            return Query.http(**args)
+        elif url.startswith("udp"):
+            return Query.udp(**args)
+        else:
+            raise TrackerQueryException(message="Unsupported URL scheme", url=url)
+    
+    @staticmethod
+    def multi(info_hash: str,
+                urls: list[str],
+                peer_id: str,  
+                event: TrackerEvent,
+                left = None, downloaded = None, uploaded = None, 
+                ip_addr: str|None = None,
+                num_want = None, key = None,
+                port: int|None = None, headers = None,
+                timeout: int|None = None, max_threads: int = 50) -> Dict[str, Dict[str, Any]]:
+        import threading
+        semaphore = threading.Semaphore(max_threads)
+        result = {}
+        threads = []  # Keep track of threads
         
-    if url.startswith("http"):
-        args["event"] = event.name.lower()
-        return Query.http(**args)
-    elif url.startswith("udp"):
-        args["event"] = event.value
-        return Query.udp(**args)
-    else:
-        raise TrackerQueryException(message="Unsupported URL scheme", url=url)
+        def threaded_check(url):
+            with semaphore:
+                try:
+                    result[url] = Query.single(info_hash, url, peer_id, event,
+                                       left, downloaded, uploaded, ip_addr,
+                                       num_want, key, port, headers, timeout)
+                except Exception as e:
+                    result[url] = {"error": str(e)}  # Store error in result instead of printing
+
+        for url in urls:
+            threaded = threading.Thread(target=threaded_check, args=(url,))
+            threaded.start()
+            threads.append(threaded)  # Keep track of the thread
+        
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join()
+            
+        return result

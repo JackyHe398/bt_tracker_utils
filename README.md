@@ -1,5 +1,7 @@
 # BT_TRACKER_UTILS
 
+**This library is currently under developement, it may change rapidly. Please use with care**
+
 ## Introduction
 
 This is a utility library for checking tracker status and querying tracker in different protocols.
@@ -48,35 +50,37 @@ seed = "8a19577fb5f690970ca43a57ff1011ae202244b8"
 peer_id = "-robots-testing12345"
 
 # specifying protocols
-bt.Query.udp("udp://tracker.torrent.eu.org:451/announce",
-         seed, peer_id,
-         bt.TrackerEvent.STARTED,
+bt.Query.udp(seed, "udp://tracker.torrent.eu.org:451/announce",
+         peer_id, bt.TrackerEvent.STARTED,
          ip_addr = "66.35.68.60", port = 6885)
 
-bt.Query.http("http://tracker.opentrackr.org:1337/announce",
-         seed, peer_id,
-         bt.TrackerEvent.STOPPED, timeout = 5,
+bt.Query.http(seed, "http://tracker.opentrackr.org:1337/announce",
+         peer_id, bt.TrackerEvent.STOPPED, timeout = 5,
          num_want = 100, key = "0327")
 
 # Smart query with auto-detection
-query("http://nyaa.tracker.wf:7777/announce",
-      seed, peer_id,
-      bt.TrackerEvent.NONE,
+bt.Query.single(seed, "udp://tracker.torrent.eu.org:451/announce",
+         peer_id, bt.TrackerEvent.STARTED,
+         ip_addr = "66.35.68.60", port = 6885)
+
+bt.Query.single(seed, "http://nyaa.tracker.wf:7777/announce",
+      peer_id, bt.TrackerEvent.NONE,
       left = 1145141919810, downloaded = 0, uploaded = 1048576)
 ```
 
 ### Full parameters
 
 ```python
-def query(url: str,
-            info_hash: str,
-            peer_id: str,  
-            event: TrackerEvent, 
-            left = 0, downloaded = 0, uploaded = 0, 
-            ip_addr: str|None = None,
-            num_want = None, key = None,
-            port: int|None = None, headers = None,
-            timeout: int = 5) -> Dict[str, Any]:
+class query
+    def single(info_hash: str,
+              url: str,  
+              peer_id: str,  
+              event: TrackerEvent, 
+              left = 0, downloaded = 0, uploaded = 0, 
+              ip_addr: str|None = None,
+              num_want = None, key = None,
+              port: int|None = None, headers = None,
+              timeout: int = 5) -> Dict[str, Any]:
 ```
 
 #### Force:
@@ -151,7 +155,6 @@ except Exception as e:
 [Concurrency Deep Dives](https://concurrencydeepdives.com/udp-tracker-protocol/)
 
 [XBTT](https://xbtt.sourceforge.net/udp_tracker_protocol.html)
-
 
 ## License
 
