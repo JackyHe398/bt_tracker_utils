@@ -5,7 +5,7 @@ A Python library for checking tracker availability and querying tracker informat
 """
 
 from .check_tracker import CheckTracker, check_trackers, check_tracker
-from .query import TrackerEvent, query, Query
+from .query import TrackerEvent, Query
 
 __version__ = "1.0.0"
 __author__ = "JackyHe398"
