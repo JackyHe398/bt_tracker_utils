@@ -143,3 +143,5 @@ class Check:
         for url, status in results.items():
             if status:
                 print(url)
+        
+        return results

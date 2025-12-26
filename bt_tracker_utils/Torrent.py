@@ -2,9 +2,9 @@ from typing import Optional
 from enum import Enum
 
 class TorrentStatus(Enum):
-    STARTED = "started"
-    COMPLETED = "completed"
-    STOPPED = "stopped"
+    COMPLETED = 1
+    STARTED = 2
+    STOPPED = 3
 
 class Torrent:
     """Represents a torrent instance, encapsulating tracker and metadata information."""
