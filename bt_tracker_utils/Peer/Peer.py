@@ -7,12 +7,16 @@ from .PeerCommunicationException import *
 
 class Peer():
     def __init__(self, peer: tuple[str, int], torrent: Torrent, self_peer_id: str):
+        # self status
         self.peer = peer
         self.torrent = torrent
         self.self_peer_id = self_peer_id
-        self.peer_id: Optional[bytes] = None
         
+        # peer status
+        self.peer_id: Optional[bytes] = None
         self.bitfield: Optional[bytes] = None
+        self.peer_supports_extensions: Optional[bool] = None
+        self.peer_extension_ids: dict[str, int] = {}
         
         # constant
         self.TIMEOUT = 5  # seconds
@@ -50,8 +54,10 @@ class Peer():
             
             # Send handshake
             msg = b'\x13BitTorrent protocol'
-            msg += b'\x00' * 8  # Reserved bytes
-            msg += bytes. fromhex(self.torrent.info_hash)
+            reserved = bytearray(8)
+            reserved[5] |= 0x10
+            msg += bytes(reserved)
+            msg += bytes.fromhex(self.torrent.info_hash)
             msg += self.self_peer_id.encode('utf-8')
             self.s.sendall(msg)
             
@@ -69,7 +75,13 @@ class Peer():
                 raise InvalidResponseException(self.peer, "Info hash mismatch")
             
             self.peer_id = response[48:68]
+            reserved_bytes = response[20:28]
+            self.peer_supports_extensions = bool(reserved_bytes[5] & 0x10)
             
+            if self.peer_supports_extensions:
+                self.send_extension_handshake()
+                self._read_all()
+
         except socket.timeout as e:
             self.close()
             raise ConnectionError(f"Connection to {self.peer} timed out")
@@ -156,7 +168,7 @@ class Peer():
             return { 'type': 'cancel'}
         elif msg_id == b'\x09':
             return { 'type': 'port'}   # TODO: Implement DHT port messages
-        elif msg_id == b'\x20':
+        elif msg_id == b'\x14':  # 20 decimal = 0x14 hex (Extended message)
             self._handle_extended_message(payload=payload)
             return { 'type': 'extend'}
         
@@ -179,7 +191,6 @@ class Peer():
                     name_str = name.decode('utf-8')
                     if name_str not in self.LOCAL_EXTENSIONS_IDS:
                         self.LOCAL_EXTENSIONS_IDS[name_str] = ext_id
-            self.supports_extensions = True
         
         # Check if this is PEX
         elif extended_id == self.LOCAL_EXTENSIONS_IDS.get('ut_pex'):
@@ -253,7 +264,7 @@ class Peer():
             raise SocketClosedException(self.peer)
         assert self.s is not None, "Socket is not connected" # just for type checker
         
-        if not self.supports_extensions:
+        if not self.peer_supports_extensions:
             raise Exception("Peer doesn't support extensions")
         
         # Build extension handshake
@@ -369,15 +380,3 @@ class Peer():
             
         except Exception as e: 
             raise InvalidResponseException(self.peer, f"Failed to parse PEX message: {e}") from e
-
-    def get_PEX(self):
-        """
-        Send a PEX request to the peer.
-        Get the Peer Exchange (PEX) information and update torrent's peer list.
-        
-        Returns:
-            A list of (ip, port) tuples representing peers known by this peer.
-        """
-        msg = b''
-        
-        
