@@ -42,8 +42,8 @@ class Torrent:
         self.left = cal_left if left is None else left
         self.event = event   # Default tracker event
         
-        self.peers: list[tuple[str, int]] = []  # List of (ip, port) tuples
-        self.peers6: list[tuple[str, int]] = [] # List of (ip, port) tuples for IPv6
+        self.peers: dict[tuple[str, int], dict] = {}  # List of (ip, port) tuples
+        self.peers6: dict[tuple[str, int], dict] = {} # List of (ip, port) tuples for IPv6
 
     def update_uploaded(self, bytes_uploaded: int):
         self.uploaded += bytes_uploaded

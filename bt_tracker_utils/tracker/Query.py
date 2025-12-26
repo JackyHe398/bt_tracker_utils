@@ -188,9 +188,9 @@ class Query:
                 
                 # Update torrent with peers
                 if "peers" in response_decode:
-                    torrent.peers = response_decode["peers"]
+                    torrent.peers |= {i: {} for i in response_decode["peers"]}
                 if "peers6" in response_decode:
-                    torrent.peers6 = response_decode["peers6"]
+                    torrent.peers6 |= {i: {} for i in response_decode["peers6"]}
                     
                 return _format_result(response_decode)
             elif status_code == 300:
@@ -273,7 +273,7 @@ class Query:
         parsed_response = _parse_udp_announce_response(response, TRANSACTION_ID)
         
         if "peers" in parsed_response:
-            torrent.peers = parsed_response["peers"]
+            torrent.peers |= {i: {} for i in parsed_response["peers"]}
             
         return _format_result(parsed_response)
 

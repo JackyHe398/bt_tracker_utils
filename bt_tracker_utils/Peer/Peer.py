@@ -187,26 +187,24 @@ class Peer():
             
             print(f"Received {len(pex_result['added'])} new peers via PEX")
             for peer_info in pex_result['added']:
-                ip = peer_info['ip']
-                port = peer_info['port']
-                self.torrent.peers.append((ip, port))
+                meta_data = {k: v for k, v in peer_info.items() if k not in ('ip', 'port')}
+                self.torrent.peers[(peer_info['ip'], peer_info['port'])] = meta_data
                 
             for peer_info in pex_result['added6']:
-                ip = peer_info['ip']
-                port = peer_info['port']
-                self.torrent.peers6.append((ip, port))
+                meta_data = {k: v for k, v in peer_info.items() if k not in ('ip', 'port')}
+                self.torrent.peers6[(peer_info['ip'], peer_info['port'])] = meta_data
             
             for peer_info in pex_result['dropped']:
                 ip = peer_info['ip']
                 port = peer_info['port']
                 if (ip, port) in self.torrent.peers:
-                    self.torrent.peers.remove((ip, port))
+                    del self.torrent.peers[(ip, port)]
             
             for peer_info in pex_result['dropped6']:
                 ip = peer_info['ip']
                 port = peer_info['port']
                 if (ip, port) in self.torrent.peers6:
-                    self.torrent.peers6.remove((ip, port))
+                    del self.torrent.peers6[(ip, port)]
         
         # Check if this is metadata
         elif extended_id == self.LOCAL_EXTENSIONS_IDS.get('ut_metadata'):
