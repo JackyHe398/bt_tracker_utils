@@ -196,7 +196,6 @@ class Peer():
         elif extended_id == self.LOCAL_EXTENSIONS_IDS.get('ut_pex'):
             pex_result = self.parse_pex_message(payload)
             
-            print(f"Received {len(pex_result['added'])} new peers via PEX")
             for peer_info in pex_result['added']:
                 meta_data = {k: v for k, v in peer_info.items() if k not in ('ip', 'port')}
                 self.torrent.peers[(peer_info['ip'], peer_info['port'])] = meta_data
