@@ -19,44 +19,36 @@ from .TrackerQueryException import (
 # example_peer_id = '-robots-testing12345'
 
 
-def _get_peer_from_bytes(response: bytes, result: list[tuple] = []) -> list[tuple]:
+def _get_peer_from_bytes(response: bytes) -> list[tuple]:
     """
     Extracts peer information from the UDP response.
     """
-    if len(response) <6:
-        return result
-    peer_bytes = response[:6]
-    ip_packed, port = struct.unpack("!4sH", peer_bytes)
-    ip = socket.inet_ntoa(ip_packed)
-    result.append((ip, port))
-    return _get_peer_from_bytes(response[6:], result)
+    result = []
+    offset = 0
+    
+    while offset + 6 <= len(response):
+        peer_bytes = response[offset:offset + 6]
+        ip_packed, port = struct.unpack("!4sH", peer_bytes)
+        ip = socket.inet_ntoa(ip_packed)
+        result.append((ip, port))
+        offset += 6
+    
+    return result
 
-def _get_peer6_from_bytes(response: bytes, result: list[tuple] = []) -> list[tuple]:
+def _get_peer6_from_bytes(response: bytes) -> list[tuple]:
     """
     Extracts peer information from the UDP response for IPv6.
     """
-    if len(response) < 18:
-        return result
-    peer_bytes = response[:18]
-    ip_packed, port = struct.unpack("!16sH", peer_bytes)
-    ip = socket.inet_ntop(socket.AF_INET6, ip_packed)
-    result.append((ip, port))
-    return _get_peer6_from_bytes(response[18:], result)
-
-def _udp_response_parser(response: bytes) -> Dict[str, Any]:
-    """
-    Parses the UDP response from the tracker.
-    """
-    result = {}
-
-    header = response[:20]
-    peer_bytes = response[20:]
-
-    action, transaction_id, result["interval"], result["leechers"], result["seeder"] = struct.unpack("!iiiii", header)
-    if action != 1 and transaction_id != 0:
-        raise InvalidResponseError(message=f"Invalid action or transaction ID, action id: {action}, transaction id: {transaction_id}")
-
-    result["peers"] = _get_peer_from_bytes(peer_bytes)
+    result = []
+    offset = 0
+    
+    while offset + 18 <= len(response):
+        peer_bytes = response[offset:offset + 18]
+        ip_packed, port = struct.unpack("!16sH", peer_bytes)
+        ip = socket.inet_ntop(socket.AF_INET6, ip_packed)
+        result.append((ip, port))
+        offset += 18
+    
     return result
 
 
@@ -87,32 +79,6 @@ def _format_result(result: Dict[str, Any]) -> Dict[str, Any]:
         formatted[key] = value
     return formatted
 
-def _decode_ip(response: dict[bytes, Any]) -> Dict[str, Any]:
-    """
-    Decodes the response from the tracker.
-    """
-
-    response[b"peers"] = _get_peer_from_bytes(response[b"peers"])
-    if b"peers6" in response:
-        response[b"peers6"] = _get_peer6_from_bytes(response[b"peers6"])
-
-
-    response_decoded = {}
-    for k, v in response.items():
-        if b'ip' in k: # if the key contains 'ip', decode with inet_ntoa
-            # Check if it's IPv4 (4 bytes) or IPv6 (16 bytes)
-            if len(response[k]) == 4:
-                v = socket.inet_ntoa(response[k])
-            elif len(response[k]) == 16:
-                v = socket.inet_ntop(socket.AF_INET6, response[k])
-            else:
-                v = response[k]
-        try: 
-            response_decoded[k.decode()] = (v.decode() if isinstance(v, bytes) else v)
-        except:
-            response_decoded[k.decode()] = v
-
-    return response_decoded
 
 class Query:
     @staticmethod
@@ -126,6 +92,34 @@ class Query:
         """
         Check if a given HTTP URL is reachable and returns a status code.
         """
+        
+        def _parse_http_tracker_response() -> Dict[str, Any]:
+            """
+            Decodes the response from the tracker to prevent issues with byte strings.
+            """
+            nonlocal response_bdecode
+            response: dict[bytes, Any] = response_bdecode
+            response[b"peers"] = _get_peer_from_bytes(response[b"peers"])
+            if b"peers6" in response:
+                response[b"peers6"] = _get_peer6_from_bytes(response[b"peers6"])
+
+
+            response_decoded = {}
+            for k, v in response.items():
+                if b'ip' in k: # if the key contains 'ip', decode with inet_ntoa
+                    # Check if it's IPv4 (4 bytes) or IPv6 (16 bytes)
+                    if len(response[k]) == 4:
+                        v = socket.inet_ntoa(response[k])
+                    elif len(response[k]) == 16:
+                        v = socket.inet_ntop(socket.AF_INET6, response[k])
+                    else:
+                        v = response[k]
+                try: 
+                    response_decoded[k.decode()] = (v.decode() if isinstance(v, bytes) else v)
+                except UnicodeDecodeError:
+                    response_decoded[k.decode()] = v
+
+            return response_decoded
         
         info_hash_bytes = bytes.fromhex(torrent.info_hash)
 
@@ -158,7 +152,12 @@ class Query:
             status_code = response.status_code//100*100  # Get the first digit of the status code
             if status_code == 200:
                 response_bdecode: dict[bytes, bytes] = dict(bec.decode(response.content))
-                response_decode = _decode_ip(response_bdecode)
+                response_decode = _parse_http_tracker_response() # decode byte strings
+                
+                if "peers" in response_decode:
+                    torrent.peers = response_decode["peers"]
+                if "peers6" in response_decode:
+                    torrent.peers6 = response_decode["peers6"]
                 return _format_result(response_decode)
             elif status_code == 300:
                 raise UnexpectedError(url=url, message="Redirection not supported")
@@ -189,6 +188,22 @@ class Query:
                 return connection_id
             else:
                 raise InvalidResponseError(url=url)
+            
+        def _udp_response_parser(response: bytes) -> Dict[str, Any]:
+            """
+            Parses the UDP response from the tracker.
+            """
+            result = {}
+
+            header = response[:20]
+            peer_bytes = response[20:]
+
+            action, transaction_id, result["interval"], result["leechers"], result["seeders"] = struct.unpack("!iiiii", header)
+            if action != 1 and transaction_id != 0:
+                raise InvalidResponseError(message=f"Invalid action or transaction ID, action id: {action}, transaction id: {transaction_id}")
+
+            result["peers"] = _get_peer_from_bytes(peer_bytes) # no ipv6 peer in udp
+            return result
 
         # region - define constants and params
         parsed = urlparse(url)
@@ -243,7 +258,13 @@ class Query:
         finally:
             s.close()
         
-        return _format_result(_udp_response_parser(response))
+        parsed_response = _udp_response_parser(response)
+        
+        # Update torrent with peers
+        if "peers" in parsed_response:
+            torrent.peers = parsed_response["peers"]
+            
+        return _format_result(parsed_response)
 
     @staticmethod
     def single(torrent: Torrent,
@@ -287,16 +308,20 @@ class Query:
         import threading
         semaphore = threading.Semaphore(max_threads)
         result = {}
+        result_lock = threading.Lock()  # Thread-safe writes
         threads = []  # Keep track of threads
         
         def threaded_check(url):
             with semaphore:
                 try:
-                    result[url] = Query.single(torrent, url, peer_id,
+                    response = Query.single(torrent, url, peer_id,
                                        ip_addr=ip_addr,
                                        num_want=num_want, key=key, port=port, headers=headers, timeout=timeout)
+                    with result_lock:
+                        result[url] = response
                 except Exception as e:
-                    result[url] = {"error": str(e)}  # Store error in result instead of printing
+                    with result_lock:
+                        result[url] = {"error": str(e)}  # Store error in result instead of printing
 
         for url in urls:
             threaded = threading.Thread(target=threaded_check, args=(url,))
