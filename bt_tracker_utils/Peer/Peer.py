@@ -1,5 +1,7 @@
 import socket
-from typing import Optional
+import bencodepy
+import struct
+from typing import Optional, Any
 from ..Torrent import Torrent
 from .PeerCommunicationException import *
 
@@ -9,9 +11,15 @@ class Peer():
         self.torrent = torrent
         self.self_peer_id = self_peer_id
         self.peer_id: Optional[bytes] = None
-        self.TIMEOUT = 5  # seconds
         
         self.bitfield: Optional[bytes] = None
+        
+        # constant
+        self.TIMEOUT = 5  # seconds
+        self.LOCAL_EXTENSIONS_IDS = {
+            'ut_pex': 1,
+            'ut_metadata': 2,
+        }
         
         self.s: Optional[socket.socket] = None
         
@@ -149,9 +157,64 @@ class Peer():
         elif msg_id == b'\x09':
             return { 'type': 'port'}   # TODO: Implement DHT port messages
         elif msg_id == b'\x20':
-            return { 'type': 'extend'}   # TODO: Implement extended messages
+            self._handle_extended_message(payload=payload)
+            return { 'type': 'extend'}
         
         raise InvalidResponseException(self.peer, f"Unknown message ID: {msg_id.hex()}")
+    
+    def _handle_extended_message(self, payload: bytes):
+        """Handle extended messages (PEX, metadata, etc.)."""
+        extended_id = payload[0]
+        payload = payload[1:]
+        
+        # Check if this is extension handshake
+        if extended_id == 0:
+            # Parse extension handshake
+            ext_handshake: dict[bytes, Any] = bencodepy.decode(payload) #type: ignore
+            
+            # Check for supported extensions
+            if b'm' in ext_handshake:
+                m_dict: dict[bytes, int] = ext_handshake[b'm']
+                for name, ext_id in m_dict.items():
+                    name_str = name.decode('utf-8')
+                    if name_str not in self.LOCAL_EXTENSIONS_IDS:
+                        self.LOCAL_EXTENSIONS_IDS[name_str] = ext_id
+            self.supports_extensions = True
+        
+        # Check if this is PEX
+        elif extended_id == self.LOCAL_EXTENSIONS_IDS.get('ut_pex'):
+            pex_result = self.parse_pex_message(payload)
+            
+            print(f"Received {len(pex_result['added'])} new peers via PEX")
+            for peer_info in pex_result['added']:
+                ip = peer_info['ip']
+                port = peer_info['port']
+                self.torrent.peers.append((ip, port))
+                
+            for peer_info in pex_result['added6']:
+                ip = peer_info['ip']
+                port = peer_info['port']
+                self.torrent.peers6.append((ip, port))
+            
+            for peer_info in pex_result['dropped']:
+                ip = peer_info['ip']
+                port = peer_info['port']
+                if (ip, port) in self.torrent.peers:
+                    self.torrent.peers.remove((ip, port))
+            
+            for peer_info in pex_result['dropped6']:
+                ip = peer_info['ip']
+                port = peer_info['port']
+                if (ip, port) in self.torrent.peers6:
+                    self.torrent.peers6.remove((ip, port))
+        
+        # Check if this is metadata
+        elif extended_id == self.LOCAL_EXTENSIONS_IDS.get('ut_metadata'):
+            # self._handle_metadata_message(payload)
+            pass
+        
+        else:
+            return # TODO unsupported extended message
     
     def _read_all(self):
         """Read all available data from the socket."""
@@ -185,3 +248,138 @@ class Peer():
                 self.bitfield = (self.bitfield[:byte_index] +
                                  bytes([self.bitfield[byte_index] | (1 << (7 - bit_index))]) +
                                  self.bitfield[byte_index + 1:])
+    
+    def send_extension_handshake(self):
+        """Send extension handshake with PEX support."""
+        if not self._is_connected():
+            raise SocketClosedException(self.peer)
+        assert self.s is not None, "Socket is not connected" # just for type checker
+        
+        if not self.supports_extensions:
+            raise Exception("Peer doesn't support extensions")
+        
+        # Build extension handshake
+        handshake_dict = {
+            b'm': {k.encode(): v for k, v in self.LOCAL_EXTENSIONS_IDS.items()},
+            b'v': b'MyTorrentLib 1.0',
+        }
+        
+        # Bencode it
+        payload = bencodepy.encode(handshake_dict)
+        
+        # Send as Extended message (ID 20, extended ID 0)
+        length = 1 + 1 + len(payload)
+        message = length.to_bytes(4, 'big')
+        message += bytes([20])   # Message ID:  Extended
+        message += bytes([0])    # Extended ID:  Handshake (always 0)
+        message += payload
+        
+        self.s.sendall(message)
+    
+
+
+    def parse_pex_message(self, payload:  bytes) -> dict:
+        """
+        Parse a PEX message and extract peer list.
+        
+        Args:
+            payload: Bencoded PEX message payload
+        
+        Returns:
+            Dictionary with 'added' and 'dropped' peer lists
+        """
+        try:
+            pex_data: dict[bytes, Any] = bencodepy.decode(payload) #type: ignore
+            result = {'added': [], 'added6': [], 'dropped': [], 'dropped6': []}
+            
+            # Parse added peers (IPv4)
+            if b'added' in pex_data:
+                added_bytes = pex_data[b'added']
+                flags_bytes = pex_data.get(b'added.f', b'')
+                
+                # Each peer is 6 bytes
+                for offset in range(0, len(added_bytes), 6):
+                    if not(offset + 6 <= len(added_bytes)):
+                        break
+                    peer_bytes = added_bytes[offset:offset + 6]
+                    flags = flags_bytes[offset//6] if offset//6 < len(flags_bytes) else 0 # Extract flags if available
+                    
+                    ip_packed, port = struct.unpack("!4sH", peer_bytes)
+                    # Extract IP (4 bytes)
+                    ip = socket.inet_ntoa(ip_packed)
+                    
+                    # build up peer info
+                    peer_info = {
+                        'ip':  ip,
+                        'port':  port,
+                    }
+                    
+                    if flags:
+                        peer_info |= {
+                            'encrypted': bool(flags & 0x01),
+                            'seed': bool(flags & 0x02),
+                            'utp': bool(flags & 0x04),
+                            'holepunch': bool(flags & 0x08),
+                            'outgoing': bool(flags & 0x10),
+                        }
+                    
+                    result['added'].append(peer_info)
+            
+            # Parse IPv6 peers (18 bytes each) if present
+            if b'added6' in pex_data:
+                added6_bytes = pex_data[b'added6']
+                flags6_bytes = pex_data.get(b'added6.f', b'')
+                for offset in range(0, len(added6_bytes), 18):
+                    if (offset + 18 <= len(added6_bytes)):
+                        break
+                    peer_bytes = added6_bytes[offset:offset + 18]
+                    flags = flags6_bytes[offset//18] if offset//18 < len(flags6_bytes) else 0 # Extract flags if available
+                    
+                    ip_packed, port = struct.unpack("!16sH", peer_bytes)
+                    # Extract IPv6 address (16 bytes)
+                    ip = socket.inet_ntop(socket.AF_INET6, ip_packed)
+                    
+                    
+                    result['added6']. append({'ip': ip, 'port': port})
+            
+            # Parse dropped peers (IPv4)
+            if b'dropped' in pex_data: 
+                dropped_bytes = pex_data[b'dropped']
+                
+                for i in range(0, len(dropped_bytes), 6):
+                    if i + 6 <= len(dropped_bytes):
+                        peer_data = dropped_bytes[i:i+6]
+                        ip = '.'.join(str(b) for b in peer_data[0:4])
+                        port = int.from_bytes(peer_data[4:6], 'big')
+                        
+                        result['dropped'].append({'ip': ip, 'port':  port})
+            
+            # Parse dropped IPv6 peers (18 bytes each)
+            if b'dropped6' in pex_data:
+                dropped6_bytes = pex_data[b'dropped6']
+                for i in range(0, len(dropped6_bytes), 18):
+                    if i + 18 <= len(dropped6_bytes):
+                        peer_data = dropped6_bytes[i:i+18]
+                        # IPv6 address (16 bytes)
+                        ipv6_bytes = peer_data[0:16]
+                        ipv6 = ':'.join(f'{b:02x}' for b in ipv6_bytes)
+                        port = int.from_bytes(peer_data[16:18], 'big')
+                        
+                        result['dropped6'].append({'ip': ipv6, 'port': port})
+            
+            return result
+            
+        except Exception as e: 
+            raise InvalidResponseException(self.peer, f"Failed to parse PEX message: {e}") from e
+
+    def get_PEX(self):
+        """
+        Send a PEX request to the peer.
+        Get the Peer Exchange (PEX) information and update torrent's peer list.
+        
+        Returns:
+            A list of (ip, port) tuples representing peers known by this peer.
+        """
+        msg = b''
+        
+        
