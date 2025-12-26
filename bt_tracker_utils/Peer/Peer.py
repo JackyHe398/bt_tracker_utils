@@ -11,6 +11,8 @@ class Peer():
         self.peer_id: Optional[bytes] = None
         self.TIMEOUT = 5  # seconds
         
+        self.bitfield: Optional[bytes] = None
+        
         self.s: Optional[socket.socket] = None
         
     def __enter__(self):
@@ -131,10 +133,11 @@ class Peer():
             return {'type': 'not_interested'}
         elif msg_id == b'\x04' and length == 5:
             index = int.from_bytes(payload[0:4], byteorder='big')
-            # TODO update peer pieces status
+            self._update_bitfield(have_index=index)
             return {'type': 'have', 'index': index}
         elif msg_id == b'\x05':
             bitfield = payload
+            self._update_bitfield(bitfield=bitfield)
             return {'type': 'bitfield', 'bitfield': bitfield}
         # this library is not serving as a full client, msg_id 6-8 will not be implemented
         elif msg_id == b'\x06':
@@ -166,3 +169,19 @@ class Peer():
             pass
         finally:
             self.s.settimeout(self.TIMEOUT)
+            
+    def _update_bitfield(self, bitfield: Optional[bytes] = None, have_index: Optional[int] = None):
+        """Update the peer's bitfield."""
+        if self.bitfield is None:
+            return
+
+        if bitfield is not None:
+            self.bitfield = bitfield
+        if have_index is not None:
+            byte_index = have_index // 8
+            bit_index = have_index % 8
+            
+            if byte_index < len(self.bitfield):
+                self.bitfield = (self.bitfield[:byte_index] +
+                                 bytes([self.bitfield[byte_index] | (1 << (7 - bit_index))]) +
+                                 self.bitfield[byte_index + 1:])
