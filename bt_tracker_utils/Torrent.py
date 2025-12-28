@@ -1,6 +1,7 @@
 import torrent_parser as tp
 import json
 import os
+import threading
 from typing import Any, Optional
 from enum import Enum
 
@@ -99,6 +100,9 @@ class Torrent:
         # File list cache (lazy-loaded when first accessed)
         self._file_cache: Optional[dict[str, dict]] = None  # {hash_hex: {'name': str, 'length': int, 'path': list}}
         
+        # Thread safety locks
+        self._lock = threading.RLock()  # For metadata and file cache
+        self._peers_lock = threading.Lock()  # For peer dictionaries
         
         # Torrent status
         self.uploaded = uploaded
@@ -192,45 +196,53 @@ class Torrent:
         """
         Get file list as {hash_hex: {'name': str, 'length': int, 'path': list}}.
         Uses lazy loading - only parses metadata once, then caches result.
+        Thread-safe with double-check locking pattern.
         
         Returns:
             Dict mapping file hash (hex) to file info, or None if metadata not available.
         """
+        # Fast path: cache already built
         if self._file_cache is not None:
             return self._file_cache
         
-        if self.metadata is None:
-            return None
-        
-        # Parse metadata and build cache
-        import bencodepy
-        info_dict: dict[bytes, Any] = bencodepy.decode(self.metadata) # type: ignore
-        self._file_cache = {}
-        
-        if b'files' in info_dict:
-            # Multi-file torrent
-            for file_info in info_dict[b'files']:
-                if b'hash' in file_info:
-                    hash_hex = file_info[b'hash'].hex()
-                    path = [p.decode('utf-8') for p in file_info[b'path']]
+        # Acquire lock for lazy initialization
+        with self._lock:
+            # Double-check: another thread might have built cache while we waited
+            if self._file_cache is not None:
+                return self._file_cache
+            
+            if self.metadata is None:
+                return None
+            
+            # Parse metadata and build cache
+            import bencodepy
+            info_dict: dict[bytes, Any] = bencodepy.decode(self.metadata) # type: ignore
+            self._file_cache = {}
+            
+            if b'files' in info_dict:
+                # Multi-file torrent
+                for file_info in info_dict[b'files']:
+                    if b'hash' in file_info:
+                        hash_hex = file_info[b'hash'].hex()
+                        path = [p.decode('utf-8') for p in file_info[b'path']]
+                        self._file_cache[hash_hex] = {
+                            'name': path[-1],
+                            'length': file_info[b'length'],
+                            'path': path
+                        }
+            else:
+                # Single-file torrent
+                if b'pieces' in info_dict:
+                    # Use first 32 bytes of pieces hash as file identifier
+                    hash_hex = info_dict[b'pieces'][:32].hex()
+                    name = info_dict[b'name'].decode('utf-8')
                     self._file_cache[hash_hex] = {
-                        'name': path[-1],
-                        'length': file_info[b'length'],
-                        'path': path
+                        'name': name,
+                        'length': info_dict[b'length'],
+                        'path': [name]
                     }
-        else:
-            # Single-file torrent
-            if b'pieces' in info_dict:
-                # Use first 32 bytes of pieces hash as file identifier
-                hash_hex = info_dict[b'pieces'][:32].hex()
-                name = info_dict[b'name'].decode('utf-8')
-                self._file_cache[hash_hex] = {
-                    'name': name,
-                    'length': info_dict[b'length'],
-                    'path': [name]
-                }
-        
-        return self._file_cache
+            
+            return self._file_cache
     
     def get_file_by_hash(self, hash_hex: str) -> Optional[dict]:
         """Get file info by hash. Returns None if not found."""

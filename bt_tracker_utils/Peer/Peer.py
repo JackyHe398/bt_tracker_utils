@@ -432,25 +432,27 @@ class Peer():
         elif extended_id == self.LOCAL_EXTENSIONS_IDS.get('ut_pex'):
             pex_result = parse_pex_message(payload, self.peer)
             
-            for peer_info in pex_result['added']:
-                meta_data = {k: v for k, v in peer_info.items() if k not in ('ip', 'port')}
-                self.torrent.peers[(peer_info['ip'], peer_info['port'])] = meta_data
+            # Thread-safe peer dict modifications
+            with self.torrent._peers_lock:
+                for peer_info in pex_result['added']:
+                    meta_data = {k: v for k, v in peer_info.items() if k not in ('ip', 'port')}
+                    self.torrent.peers[(peer_info['ip'], peer_info['port'])] = meta_data
+                    
+                for peer_info in pex_result['added6']:
+                    meta_data = {k: v for k, v in peer_info.items() if k not in ('ip', 'port')}
+                    self.torrent.peers6[(peer_info['ip'], peer_info['port'])] = meta_data
                 
-            for peer_info in pex_result['added6']:
-                meta_data = {k: v for k, v in peer_info.items() if k not in ('ip', 'port')}
-                self.torrent.peers6[(peer_info['ip'], peer_info['port'])] = meta_data
-            
-            for peer_info in pex_result['dropped']:
-                ip = peer_info['ip']
-                port = peer_info['port']
-                if (ip, port) in self.torrent.peers:
-                    del self.torrent.peers[(ip, port)]
-            
-            for peer_info in pex_result['dropped6']:
-                ip = peer_info['ip']
-                port = peer_info['port']
-                if (ip, port) in self.torrent.peers6:
-                    del self.torrent.peers6[(ip, port)]
+                for peer_info in pex_result['dropped']:
+                    ip = peer_info['ip']
+                    port = peer_info['port']
+                    if (ip, port) in self.torrent.peers:
+                        del self.torrent.peers[(ip, port)]
+                
+                for peer_info in pex_result['dropped6']:
+                    ip = peer_info['ip']
+                    port = peer_info['port']
+                    if (ip, port) in self.torrent.peers6:
+                        del self.torrent.peers6[(ip, port)]
         
         # Check if this is metadata
         elif extended_id == self.LOCAL_EXTENSIONS_IDS.get('ut_metadata'): 
@@ -592,9 +594,14 @@ class Peer():
                 f"Metadata hash mismatch: expected {self.torrent.info_hash}, got {computed_hash}"
             )
         
-        # Store verified metadata
-        self.torrent.metadata = full_metadata
-        print(f"Metadata assembled and verified: {len(full_metadata)} bytes, hash: {computed_hash[:16]}...")
+        # Store verified metadata (thread-safe)
+        with self.torrent._lock:
+            # Only set if not already set by another thread
+            if self.torrent.metadata is None:
+                self.torrent.metadata = full_metadata
+                print(f"Metadata assembled and verified: {len(full_metadata)} bytes, hash: {computed_hash[:16]}...")
+            else:
+                print(f"Metadata already set by another thread")
         
         # Clear pieces to free memory
         self.metadata_pieces.clear()
