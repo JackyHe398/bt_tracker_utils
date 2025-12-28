@@ -1,4 +1,7 @@
+import io
+import json
 from bt_tracker_utils import Peer, TorrentStatus, Torrent
+from torrent_parser import TorrentFileParser
 from time import sleep
 from datetime import datetime, timedelta
 
@@ -14,11 +17,20 @@ try:
     print(f"Peer extensions IDs: {peer.peer_extension_ids}")
     
     timeout = datetime.now() + timedelta(minutes=2)
-    while datetime.now() < timeout:
-        peer._read_all()
+    while datetime.now() < timeout and not torrent.peers:
+        peer.read_all()
         sleep(10)
         print(torrent.peers)
-        
+        print(torrent.peers6)
+    
+    print("\n\n\nRequesting metadata...")
+    peer.request_all_metadata()
+    if torrent.metadata:
+        f = io.BytesIO(torrent.metadata)
+        meta_dict = TorrentFileParser(f).parse()
+        print(json.dumps(meta_dict, indent=2))
+    else:
+        print("No metadata received from peer.")
         
 finally:
     peer.close()
