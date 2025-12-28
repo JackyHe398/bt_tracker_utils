@@ -1,7 +1,6 @@
 import socket
 import bencodepy
 import struct
-import asyncio
 from datetime import datetime
 from typing import Optional, Any
 from ..Torrent import Torrent
@@ -617,19 +616,3 @@ class Peer():
             pass
         finally:
             self.s.settimeout(self.TIMEOUT)
-            
-    async def keep_alive_loop(self, interval: int = 60):
-        """
-        Asynchronous loop to send keep-alive messages at regular intervals.
-        
-        Args:
-            interval: Time in seconds between keep-alive messages (default: 60)
-        """
-        while self._is_connected():
-            current_time = datetime.now().timestamp()
-            if current_time - self.last_keep_alive_sent >= interval:
-                try:
-                    self.send_keep_alive()
-                except SocketClosedException:
-                    break
-            await asyncio.sleep(interval)  
