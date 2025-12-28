@@ -211,19 +211,6 @@ class Peer():
     # endregion
     
     # region - send messages and handshakes
-    def send_extended_msg(self, payload: bytes, extended_id):
-        assert self.s is not None, "Socket is not connected"
-        
-        # Send as Extended message (ID 20, with specified extended ID)
-        length = 1 + 1 + len(payload)
-        message = length.to_bytes(4, 'big')
-        message += bytes([20])   # Message ID:  Extended
-        message += bytes([extended_id])    # Extended ID (0 for handshake, or extension-specific ID)
-        message += payload
-        
-        self.s.sendall(message)
-        
-        
     def send_extension_handshake(self):
         """Send extension handshake with PEX support."""
         if not self._is_connected():
@@ -288,6 +275,19 @@ class Peer():
             
         # Read responses
         self.read_all()
+        
+    
+    def send_extended_msg(self, payload: bytes, extended_id):
+        assert self.s is not None, "Socket is not connected"
+        
+        # Send as Extended message (ID 20, with specified extended ID)
+        length = 1 + 1 + len(payload)
+        message = length.to_bytes(4, 'big')
+        message += bytes([20])   # Message ID:  Extended
+        message += bytes([extended_id])    # Extended ID (0 for handshake, or extension-specific ID)
+        message += payload
+        
+        self.s.sendall(message)
     # endregion
     
 
@@ -458,12 +458,40 @@ class Peer():
                         self._assemble_metadata()
                     
             elif msg_type == 2:  # reject
-                print(f"Peer rejected metadata request for piece {piece}")
-                raise InvalidResponseException(self.peer, f"Peer rejected metadata request for piece {piece}")
-                
-            elif msg_type == 0:  # request (peer is asking us for metadata)
-                # We don't serve metadata, so ignore or reject
+                # Peer rejected our metadata request
                 pass
+                
+            elif msg_type == 0:  # request
+                def reject():
+                    nonlocal self
+                    response_payload = bencodepy.encode({b'msg_type': 2, b'piece': piece})
+                    extended_id = self.peer_extension_ids.get('ut_metadata')
+                    if extended_id is not None:
+                        self.send_extended_msg(response_payload, extended_id)
+                if self.torrent.metadata is None:
+                    reject()
+                    return
+                # Peer is requesting metadata piece from us
+                piece_offset = piece * METADATA_PIECE_SIZE
+                piece_data = self.torrent.metadata[piece_offset:piece_offset + METADATA_PIECE_SIZE]
+                
+                # Only send if piece exists (valid range)
+                if piece_data:
+                    # Build response message
+                    response_dict = {
+                        b'msg_type': 1,  # data
+                        b'piece': piece,
+                        b'total_size': len(self.torrent.metadata),  # Include total size (BEP 9 recommended)
+                    }
+                    response_payload = bencodepy.encode(response_dict) + piece_data
+                    
+                    # Send response
+                    extended_id = self.peer_extension_ids.get('ut_metadata')
+                    if extended_id is not None:
+                        self.send_extended_msg(response_payload, extended_id)
+                else:
+                    # Reject: piece out of range
+                    reject()
                 
         except Exception as e:
             raise InvalidResponseException(self.peer, f"Failed to parse metadata message: {e}") from e
