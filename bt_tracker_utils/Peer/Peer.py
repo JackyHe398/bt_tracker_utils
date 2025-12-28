@@ -1,6 +1,8 @@
 import socket
 import bencodepy
 import struct
+import asyncio
+from datetime import datetime
 from typing import Optional, Any
 from ..Torrent import Torrent
 from .PeerCommunicationException import *
@@ -101,7 +103,6 @@ def parse_pex_message(payload: bytes, peer_addr: Optional[tuple[str, int]] = Non
         return result
         
     except Exception as e:
-        peer_str = f"{peer_addr[0]}:{peer_addr[1]}" if peer_addr else "unknown peer"
         raise InvalidResponseException(peer_addr or ("unknown", 0), f"Failed to parse PEX message: {e}") from e
 
 class Peer():
@@ -110,6 +111,7 @@ class Peer():
         self.peer = peer
         self.torrent = torrent
         self.self_peer_id = self_peer_id
+        self.last_keep_alive_sent: float = 0 # timestamp of last keep-alive sent
         
         # peer status
         self.peer_id: Optional[bytes] = None
@@ -166,7 +168,7 @@ class Peer():
             msg += bytes(reserved)
             msg += bytes.fromhex(self.torrent.info_hash)
             msg += self.self_peer_id.encode('utf-8')
-            self.s.sendall(msg)
+            self.sendall(msg)
             
             # Receive handshake response
             response = self.s.recv(68)
@@ -184,6 +186,7 @@ class Peer():
             self.peer_id = response[48:68]
             reserved_bytes = response[20:28]
             self.peer_supports_extensions = bool(reserved_bytes[5] & 0x10)
+            self.last_keep_alive = datetime.now().timestamp()
             
             if self.peer_supports_extensions:
                 self.send_extension_handshake()
@@ -211,6 +214,11 @@ class Peer():
     # endregion
     
     # region - send messages and handshakes
+    def sendall(self, data: bytes):
+        assert self.s is not None, "Socket is not connected"
+        self.last_keep_alive_sent = datetime.now().timestamp()
+        self.s.sendall(data)
+        
     def send_extension_handshake(self):
         """Send extension handshake with PEX support."""
         if not self._is_connected():
@@ -287,7 +295,40 @@ class Peer():
         message += bytes([extended_id])    # Extended ID (0 for handshake, or extension-specific ID)
         message += payload
         
-        self.s.sendall(message)
+        self.sendall(message)
+        
+    def send_keep_alive(self):
+        """
+        Send a keep-alive message to the peer (length prefix 0).
+        """
+        if not self._is_connected():
+            raise SocketClosedException(self.peer)
+        assert self.s is not None, "Socket is not connected"
+        
+        # Keep-alive message: <len=0000>
+        message = (0).to_bytes(4, 'big')
+        self.sendall(message)
+        
+    def send_piece_msg(self, index: int, begin: int, block: bytes):
+        """
+        Send a piece message to the peer (message ID 7).
+        
+        Args:
+            index: Piece index (which piece)
+            begin: Byte offset within the piece (where this block starts)
+            block: The actual data block to send
+        """
+        assert self.s is not None, "Socket is not connected"
+        
+        # Message format: <len=0009+X><id=7><index><begin><block>
+        length = 1 + 4 + 4 + len(block)  # id + index + begin + block
+        message = length.to_bytes(4, 'big')
+        message += bytes([7])  # Message ID: Piece
+        message += index.to_bytes(4, 'big')
+        message += begin.to_bytes(4, 'big')
+        message += block
+        
+        self.sendall(message)
     # endregion
     
 
@@ -576,3 +617,19 @@ class Peer():
             pass
         finally:
             self.s.settimeout(self.TIMEOUT)
+            
+    async def keep_alive_loop(self, interval: int = 60):
+        """
+        Asynchronous loop to send keep-alive messages at regular intervals.
+        
+        Args:
+            interval: Time in seconds between keep-alive messages (default: 60)
+        """
+        while self._is_connected():
+            current_time = datetime.now().timestamp()
+            if current_time - self.last_keep_alive_sent >= interval:
+                try:
+                    self.send_keep_alive()
+                except SocketClosedException:
+                    break
+            await asyncio.sleep(interval)  
