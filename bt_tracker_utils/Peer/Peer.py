@@ -5,6 +5,7 @@ from typing import Optional, Any
 from ..Torrent import Torrent
 from .PeerCommunicationException import *
 
+METADATA_PIECE_SIZE = 16384  # 16KB per piece (BEP 9 standard)
 
 def parse_pex_message(payload: bytes, peer_addr: Optional[tuple[str, int]] = None) -> dict:
     """
@@ -116,6 +117,10 @@ class Peer():
         self.peer_supports_extensions: Optional[bool] = None
         self.peer_extension_ids: dict[str, int] = {}
         
+        # metadata tracking for multi-piece downloads
+        self.metadata_size: Optional[int] = None  # Total metadata size in bytes
+        self.metadata_pieces: dict[int, bytes] = {}  # {piece_index: piece_data}
+        
         # constant
         self.TIMEOUT = 5  # seconds
         self.LOCAL_EXTENSIONS_IDS = {
@@ -206,6 +211,19 @@ class Peer():
     # endregion
     
     # region - send messages and handshakes
+    def send_extended_msg(self, payload: bytes, extended_id):
+        assert self.s is not None, "Socket is not connected"
+        
+        # Send as Extended message (ID 20, with specified extended ID)
+        length = 1 + 1 + len(payload)
+        message = length.to_bytes(4, 'big')
+        message += bytes([20])   # Message ID:  Extended
+        message += bytes([extended_id])    # Extended ID (0 for handshake, or extension-specific ID)
+        message += payload
+        
+        self.s.sendall(message)
+        
+        
     def send_extension_handshake(self):
         """Send extension handshake with PEX support."""
         if not self._is_connected():
@@ -224,14 +242,52 @@ class Peer():
         # Bencode it
         payload = bencodepy.encode(handshake_dict)
         
-        # Send as Extended message (ID 20, extended ID 0)
-        length = 1 + 1 + len(payload)
-        message = length.to_bytes(4, 'big')
-        message += bytes([20])   # Message ID:  Extended
-        message += bytes([0])    # Extended ID:  Handshake (always 0)
-        message += payload
+        self.send_extended_msg(payload, 0)  # Extended ID 0 for handshake
         
-        self.s.sendall(message)
+    def request_metadata(self, piece: int = 0):
+        """
+        Request a specific metadata piece from peer using ut_metadata extension.
+        
+        Args:
+            piece: Piece index to request (default: 0)
+        """
+        if not self._is_connected():
+            raise SocketClosedException(self.peer)
+        assert self.s is not None, "Socket is not connected" # just for type checker
+        
+        if 'ut_metadata' not in self.peer_extension_ids:
+            print(self.peer_extension_ids)
+            raise Exception("Peer doesn't support ut_metadata extension")
+        
+        # Build request message
+        request_dict = {
+            b'msg_type': 0,  # request
+            b'piece': piece,
+        }
+        
+        payload = bencodepy.encode(request_dict)
+        
+        # Send as Extended message (ID 20, extended ID for ut_metadata)
+        extended_id = self.peer_extension_ids['ut_metadata']
+        self.send_extended_msg(payload, extended_id)
+    
+    def request_all_metadata(self):
+        """
+        Request all metadata pieces from peer.
+        Must be called after receiving extension handshake with metadata_size.
+        """
+        if self.metadata_size is None:
+            raise Exception("Metadata size unknown. Wait for extension handshake.")
+        
+        # Calculate number of pieces needed
+        num_pieces = (self.metadata_size + METADATA_PIECE_SIZE - 1) // METADATA_PIECE_SIZE
+        
+        # Request each piece
+        for piece_idx in range(num_pieces):
+            self.request_metadata(piece_idx)
+            
+        # Read responses
+        self.read_all()
     # endregion
     
 
@@ -310,6 +366,7 @@ class Peer():
     
     def _handle_extended_message(self, payload: bytes):
         """Handle extended messages (PEX, metadata, etc.)."""
+        print("_handle_extended_message called")
         extended_id = payload[0]
         payload = payload[1:]
         
@@ -323,8 +380,13 @@ class Peer():
                 m_dict: dict[bytes, int] = ext_handshake[b'm']
                 for name, ext_id in m_dict.items():
                     name_str = name.decode('utf-8')
-                    if name_str not in self.LOCAL_EXTENSIONS_IDS:
-                        self.LOCAL_EXTENSIONS_IDS[name_str] = ext_id
+                    if name_str not in self.peer_extension_ids:
+                        self.peer_extension_ids[name_str] = ext_id
+            
+            # Extract metadata_size if present (BEP 9)
+            if b'metadata_size' in ext_handshake:
+                self.metadata_size = ext_handshake[b'metadata_size']
+                print(f"Peer has metadata: {self.metadata_size} bytes")
         
         # Check if this is PEX
         elif extended_id == self.LOCAL_EXTENSIONS_IDS.get('ut_pex'):
@@ -351,12 +413,60 @@ class Peer():
                     del self.torrent.peers6[(ip, port)]
         
         # Check if this is metadata
-        elif extended_id == self.LOCAL_EXTENSIONS_IDS.get('ut_metadata'):
-            # self._handle_metadata_message(payload)
-            pass
+        elif extended_id == self.LOCAL_EXTENSIONS_IDS.get('ut_metadata'): 
+            self._handle_metadata_message(payload)
         
         else:
             return # TODO unsupported extended message
+    
+    def _handle_metadata_message(self, payload: bytes):
+        """
+        Handle ut_metadata message response and reassemble multiple pieces.
+        
+        The payload format is:
+        - Bencoded dict with msg_type, piece, (optionally total_size)
+        - Followed by actual metadata bytes if msg_type=1
+        """
+        print("handle_metadata_message called")
+        # Find where bencoded dict ends
+        # The dict is terminated by 'e', and metadata follows
+        dict_end = payload.find(b'ee') + 2  # +2 to include the 'ee'
+        if dict_end < 2:
+            dict_end = payload.find(b'e') + 1
+            
+        bencoded_dict = payload[:dict_end]
+        metadata_bytes = payload[dict_end:]
+        
+        try:
+            msg_dict: dict[bytes, Any] = bencodepy.decode(bencoded_dict)  # type: ignore
+            msg_type = msg_dict.get(b'msg_type', -1)
+            piece = msg_dict.get(b'piece', 0)
+            
+            if msg_type == 1:  # data
+                # Successfully received metadata piece
+                total_size = msg_dict.get(b'total_size')
+                if total_size and self.metadata_size is None:
+                    self.metadata_size = total_size
+                
+                # Store the piece
+                if metadata_bytes:
+                    self.metadata_pieces[piece] = metadata_bytes
+                    print(f"Received metadata piece {piece}: {len(metadata_bytes)} bytes")
+                    
+                    # Check if we have all pieces
+                    if self._is_metadata_complete():
+                        self._assemble_metadata()
+                    
+            elif msg_type == 2:  # reject
+                print(f"Peer rejected metadata request for piece {piece}")
+                raise InvalidResponseException(self.peer, f"Peer rejected metadata request for piece {piece}")
+                
+            elif msg_type == 0:  # request (peer is asking us for metadata)
+                # We don't serve metadata, so ignore or reject
+                pass
+                
+        except Exception as e:
+            raise InvalidResponseException(self.peer, f"Failed to parse metadata message: {e}") from e
     # endregion
 
     def _update_bitfield(self, bitfield: Optional[bytes] = None, have_index: Optional[int] = None):
@@ -372,8 +482,56 @@ class Peer():
                 self.bitfield = (self.bitfield[:byte_index] +
                                  bytes([self.bitfield[byte_index] | (1 << (7 - bit_index))]) +
                                  self.bitfield[byte_index + 1:])
+                
     
     
+    def _is_metadata_complete(self) -> bool:
+        """Check if all metadata pieces have been received."""
+        if self.metadata_size is None:
+            return False
+        
+        num_pieces = (self.metadata_size + METADATA_PIECE_SIZE - 1) // METADATA_PIECE_SIZE
+        
+        # Check if we have all pieces
+        for i in range(num_pieces):
+            if i not in self.metadata_pieces:
+                return False
+        
+        return True
+    
+    def _assemble_metadata(self):
+        """
+        Reassemble metadata pieces into complete metadata and verify hash.
+        """
+        if not self._is_metadata_complete():
+            raise Exception("Cannot assemble: metadata incomplete")
+        
+        # Sort pieces by index and concatenate
+        sorted_pieces = sorted(self.metadata_pieces.items())
+        full_metadata = b''.join(piece_data for _, piece_data in sorted_pieces)
+        
+        # Trim to exact size (last piece might be padded)
+        if self.metadata_size:
+            full_metadata = full_metadata[:self.metadata_size]
+        
+        # Verify info_hash
+        import hashlib
+        computed_hash = hashlib.sha1(full_metadata).hexdigest()
+        
+        if computed_hash != self.torrent.info_hash:
+            raise InvalidResponseException(
+                self.peer, 
+                f"Metadata hash mismatch: expected {self.torrent.info_hash}, got {computed_hash}"
+            )
+        
+        # Store verified metadata
+        self.torrent.metadata = full_metadata
+        print(f"Metadata assembled and verified: {len(full_metadata)} bytes, hash: {computed_hash[:16]}...")
+        
+        # Clear pieces to free memory
+        self.metadata_pieces.clear()
+    
+
     def read_all(self):
         """Read all available data from the socket."""
         if not self._is_connected():
@@ -382,9 +540,9 @@ class Peer():
         
         try:
             while True:
-                self.s.settimeout(0.1) # short timeout for shorter blocks
                 # long timeout will be applied in the middle of _receive_msg
                 self._receive_msg()
+                self.s.settimeout(0.1) # short timeout from second receive for shorter blocks
         except socket.timeout:
             # Finish reading
             pass
