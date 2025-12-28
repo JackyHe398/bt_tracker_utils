@@ -584,24 +584,14 @@ class Peer():
         if self.metadata_size:
             full_metadata = full_metadata[:self.metadata_size]
         
-        # Verify info_hash
-        import hashlib
-        computed_hash = hashlib.sha1(full_metadata).hexdigest()
-        
-        if computed_hash != self.torrent.info_hash:
-            raise InvalidResponseException(
-                self.peer, 
-                f"Metadata hash mismatch: expected {self.torrent.info_hash}, got {computed_hash}"
-            )
-        
-        # Store verified metadata (thread-safe)
-        with self.torrent._lock:
-            # Only set if not already set by another thread
-            if self.torrent.metadata is None:
-                self.torrent.metadata = full_metadata
-                print(f"Metadata assembled and verified: {len(full_metadata)} bytes, hash: {computed_hash[:16]}...")
-            else:
-                print(f"Metadata already set by another thread")
+        # Update torrent with metadata (thread-safe, includes hash verification)
+        try:
+            self.torrent.update_from_metadata(full_metadata)
+            import hashlib
+            computed_hash = hashlib.sha1(full_metadata).hexdigest()
+            print(f"Metadata assembled and verified: {len(full_metadata)} bytes, hash: {computed_hash[:16]}...")
+        except ValueError as e:
+            raise InvalidResponseException(self.peer, str(e)) from e
         
         # Clear pieces to free memory
         self.metadata_pieces.clear()

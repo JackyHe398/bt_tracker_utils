@@ -249,4 +249,51 @@ class Torrent:
         files = self.get_files()
         return files.get(hash_hex) if files else None
     
+    def update_from_metadata(self, metadata: bytes):
+        """
+        Update torrent fields (name, piece_length, num_pieces, total_size) 
+        from metadata received from peer. Thread-safe.
+        
+        Args:
+            metadata: Bencoded 'info' dictionary bytes
+        """
+        with self._lock:
+            import bencodepy
+            import hashlib
+            
+            # Verify hash matches
+            computed_hash = hashlib.sha1(metadata).hexdigest()
+            if computed_hash != self.info_hash:
+                raise ValueError(f"Metadata hash mismatch: expected {self.info_hash}, got {computed_hash}")
+            
+            # Store metadata
+            self.metadata = metadata
+            
+            # Decode and update fields
+            info: dict[bytes, Any] = bencodepy.decode(metadata)  # type: ignore
+            
+            # Update name if not set
+            if self.name is None and b'name' in info:
+                self.name = info[b'name'].decode('utf-8')
+            
+            # Update piece_length if not set
+            if self.piece_length is None and b'piece length' in info:
+                self.piece_length = info[b'piece length']
+            
+            # Update num_pieces if not set
+            if self.num_pieces is None and b'pieces' in info:
+                self.num_pieces = len(info[b'pieces']) // 20
+            
+            # Recalculate total_size from metadata
+            if b'files' in info:
+                # Multi-file torrent
+                calculated_size = sum(f[b'length'] for f in info[b'files'])
+            else:
+                # Single-file torrent
+                calculated_size = info.get(b'length', 0)
+            
+            # Update total_size and left
+            if calculated_size > 0:
+                self.total_size = calculated_size
+                self.left = max(self.total_size - self.downloaded, 0)
     # endregion - helper functions
