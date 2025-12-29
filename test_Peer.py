@@ -1,6 +1,6 @@
 import io
 import json
-from bt_tracker_utils import Peer, TorrentStatus, Torrent
+from  torrentlib import Peer, TorrentStatus, Torrent
 from torrent_parser import TorrentFileParser
 from time import sleep
 from datetime import datetime, timedelta

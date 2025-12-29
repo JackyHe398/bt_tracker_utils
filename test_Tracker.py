@@ -1,4 +1,4 @@
-from bt_tracker_utils import Tracker, TorrentStatus, Torrent
+from  torrentlib import Tracker, TorrentStatus, Torrent
 from random import choice, sample
 
 def test_multiple_trackers_check():
