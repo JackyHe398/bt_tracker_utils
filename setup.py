@@ -9,7 +9,9 @@ setup(
     install_requires=[
         "requests>=2.32.4",
         "bencodepy>=0.9.5",
-        "urllib3>=2.5.0"
+        "urllib3>=2.5.0",
+        "humanize>=4.9.0",
+        "torrent-parser>=0.7.0"
     ],
     packages=find_packages(),
     python_requires=">=3.6",
