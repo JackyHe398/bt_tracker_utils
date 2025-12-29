@@ -1,7 +1,6 @@
 import torrent_parser as tp
-import json
-import os
 import threading
+import humanize
 from typing import Any, Optional
 from enum import Enum
 
@@ -113,6 +112,31 @@ class Torrent:
         
         self.peers: dict[tuple[str, int], dict] = {}  # List of (ip, port) tuples
         self.peers6: dict[tuple[str, int], dict] = {} # List of (ip, port) tuples for IPv6
+    
+    def __str__(self) -> str:
+        """"Human-readable string representation of the torrent."""
+        
+        name = self.name if self.name else "Unknown"
+        hash_short = self.info_hash[:16] + "..." if len(self.info_hash) > 16 else self.info_hash
+        
+        size_str = humanize.naturalsize(self.total_size, binary=True)
+        progress = ((self.total_size - self.left) / self.total_size * 100) if self.total_size > 0 else 0
+        
+        parts = [
+            f"Torrent('{name}'",
+            f"hash={hash_short}",
+            f"size={size_str}",
+            f"progress={progress:.1f}%",
+            f"peers={len(self.peers)}",
+        ]
+        
+        return ", ".join(parts) + ")"
+    
+    def __repr__(self) -> str:
+        """Developer-friendly representation."""
+        return (f"Torrent(info_hash='{self.info_hash[:16]}...', "
+                f"name={self.name!r}, total_size={self.total_size}, "
+                f"downloaded={self.downloaded}, uploaded={self.uploaded})")
         
     @classmethod
     def from_file(cls, filename: str, downloaded: int = 0, uploaded: int = 0, 

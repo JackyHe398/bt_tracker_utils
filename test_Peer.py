@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 torrent = Torrent("95eac181669f6e2e26a2513f9b2c9f6d3d4e0ec1", 0)
 self_peer_id = "-robots-testing12345"
 peer = Peer(('192.168.0.150', 50413), torrent, self_peer_id)
+print(torrent)
 
 try:
     peer.connect()
@@ -28,9 +29,10 @@ try:
     if torrent.metadata:
         f = io.BytesIO(torrent.metadata)
         meta_dict = TorrentFileParser(f).parse()
-        print(json.dumps(meta_dict, indent=2))
     else:
         print("No metadata received from peer.")
         
 finally:
     peer.close()
+    
+print(torrent)
