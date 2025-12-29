@@ -18,7 +18,8 @@ def test_tracker_query():
     self_peer_id = "-robots-testing12345"
     for tracker_url in ('https://tracker.ghostchu-services.top:443/announce',
                         'udp://tracker.torrent.eu.org:451/announce',
-                        'http://tracker.opentrackr.org:1337/announce'):
+                        'http://tracker.opentrackr.org:1337/announce',
+                        'http://example.com/announce'):
         try:
             result = Tracker.Query.single(torrent, tracker_url, self_peer_id)
             print(result)
