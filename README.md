@@ -1,6 +1,18 @@
 # BT_TRACKER_UTILS
 
-**This library is currently under developement, it may change rapidly. Please use with care**
+> **DEPRECATED**: This package has been renamed to and replaced by **[torrentlib](https://pypi.org/project/torrentlib/)**
+> Please use `pip install torrentlib` and update your imports.
+> This package will be removed in a future version.
+>
+> **Migration:**
+>
+> ```python
+> # Old
+> from bt_tracker_utils import Torrent, Tracker
+>
+> # New
+> from torrentlib import Torrent, Tracker
+> ```
 
 ## Introduction
 
