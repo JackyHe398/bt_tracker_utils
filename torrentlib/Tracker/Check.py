@@ -2,6 +2,7 @@ import requests
 import struct
 import random
 import socket
+import logging
 from bencodepy import decode as bdecode, exceptions as bexceptions
 from urllib.parse import urlparse
 from collections.abc import Iterable
@@ -39,26 +40,26 @@ class Check:
                                     allow_redirects=True,
                                     timeout=timeout)
         except requests.exceptions.Timeout as e:
-            print(f"❌ {url}: Timeout - {e}")
+            logging.debug(f"❌ {url}: Timeout - {e}")
             return False
         except requests.exceptions.RequestException as e:
-            print(f"❌ {url}: Unexpected error - {e}")
+            logging.debug(f"❌ {url}: Unexpected error - {e}")
             return False
         
         sc = response.status_code
         if sc == 200:
-            print(f"✅ {url}: Active")
+            logging.debug(f"✅ {url}: Active")
             try: 
                 bdecode(response.content)
                 return True
             except bexceptions.DecodingError as e:
-                print(f"❌ {url}: Invalid response format - {e}")
+                logging.debug(f"❌ {url}: Invalid response format - {e}")
                 return False
         elif sc == 400: 
-            print(f"⚠️ {url}: Active, (400) Bad Request")
+            logging.debug(f"⚠️ {url}: Active, (400) Bad Request")
             return False
         else:
-            print(f"⚠️ Responded but not valid: {url} ({response.status_code})")
+            logging.debug(f"⚠️ Responded but not valid: {url} ({response.status_code})")
             return False
 
     @staticmethod
@@ -69,10 +70,10 @@ class Check:
         def response_validator(response, id)-> bool:
             action, transaction_id, connection_id = struct.unpack("!iiq", response[:16])
             if action == ACTION and transaction_id == id:
-                print(f"✅ {url}: Active")
+                logging.debug(f"✅ {url}: Active")
                 return True
             else:
-                print(f"❌ {url}: Invalid response")
+                logging.debug(f"❌ {url}: Invalid response")
                 return False
             
         parsed = urlparse(url)
@@ -111,7 +112,7 @@ class Check:
         elif url.startswith("udp"):
             return Check.udp(url, timeout=timeout)
         else:
-            print(f"❌ Unsupported scheme: {url}")
+            logging.debug(f"❌ Unsupported scheme: {url}")
             return False
         
     @staticmethod
@@ -139,9 +140,9 @@ class Check:
 
 
         # Final list of active trackers
-        print("\n\n\n🧲 Active Trackers List:")
+        logging.info("\n\n\n🧲 Active Trackers List:")
         for url, status in results.items():
             if status:
-                print(url)
+                logging.info(url)
         
         return results

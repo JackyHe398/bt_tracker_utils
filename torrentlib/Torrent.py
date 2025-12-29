@@ -56,7 +56,7 @@ class TorrentStatus(Enum):
 class Torrent:
     """Represents a torrent instance, encapsulating tracker and metadata information."""
     def __init__(self, info_hash: str,
-            total_size: int, left: Optional[int] = None,
+            total_size: int = 0, left: Optional[int] = None,
             downloaded: int = 0, uploaded: int = 0,
             event: TorrentStatus = TorrentStatus.STARTED,
             name: Optional[str] = None,

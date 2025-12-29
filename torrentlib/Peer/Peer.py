@@ -279,9 +279,6 @@ class Peer():
         # Request each piece
         for piece_idx in range(num_pieces):
             self.request_metadata(piece_idx)
-            
-        # Read responses
-        self.read_all()
         
     
     def send_extended_msg(self, payload: bytes, extended_id):
