@@ -32,6 +32,7 @@ BitTorrent networks thrive on reciprocity. If you download content, please contr
 ### Metadata management
 
 - Retrieve torrent metadata from peers using the BitTorrent Extension Protocol (BEP 9)
+- Thread-safe peer and metadata management for concurrent operations
 
 ### Tracker Operations
 
@@ -127,10 +128,6 @@ Once you have a Torrent object, query trackers to get peer lists. We strongly re
 from torrentlib import Torrent, TorrentStatus
 from torrentlib.Tracker import Query
 
-# Load torrent
-torrent = Torrent.from_file("example.torrent")
-peer_id = "-robots-testing12345"  # Your 20-byte client ID
-
 # Basic query with auto-protocol detection
 response = Query.single(
     info_hash=torrent.info_hash,
@@ -166,22 +163,11 @@ for ip, port in response.get('peers', []):
 
 ### Peer Communication
 
-Connect to peers to exchange metadata and peer lists using the BitTorrent peer protocol. PEX data is exchanged automatically when connected to a peer that supports it, no request is needed or can speed it up.:
+Connect to peers to exchange metadata and peer lists using the BitTorrent peer protocol. PEX data is exchanged automatically when connected to a peer that supports it, no request is needed or can speed it up. Keep-alive messages must be sent manually to maintain long-running connections:
 
 ```python
 from torrentlib import Torrent, Peer
 from time import sleep
-
-# Create torrent (from file or just info_hash)
-torrent = Torrent(
-    info_hash="1234567890abcdef1234567890abcdef12345678"
-)
-
-# Your peer ID (20 characters)
-peer_id = "-robots-testing12345"
-
-# Connect to a peer (get peer addresses from tracker)
-peer_addr = ('192.168.1.100', 6881)
 
 with Peer(peer_addr, torrent, peer_id) as peer:
     print(f"Connected: {peer}")
@@ -198,21 +184,61 @@ with Peer(peer_addr, torrent, peer_id) as peer:
         print(f"  {ip}:{port} - {metadata}")
 ```
 
+#### Maintaining Long Connections with Keep-Alive
+
+For long-running connections, send keep-alive messages periodically to prevent timeouts:
+
+```python
+import threading
+from time import sleep
+from torrentlib import Peer
+from torrentlib.PeerCommunicationExceptions import SocketClosedException
+
+def keep_alive_loop(peer: Peer, interval: int = 120, stop_event: threading.Event = None):
+    """
+    Send keep-alive messages periodically.
+    
+    Args:
+        peer: Peer object to send keep-alive to
+        interval: Seconds between keep-alive messages (default: 120)
+        stop_event: Optional event to signal thread to stop
+    """
+    while not (stop_event and stop_event.is_set()):
+        try:
+            sleep(interval)
+            peer.send_keep_alive()
+            print(f"Keep-alive sent to {peer.peer}")
+        except SocketClosedException:
+            print(f"Connection closed to {peer.peer}, exiting keep-alive loop")
+            break
+        except Exception as e:
+            print(f"Error sending keep-alive: {e}")
+            break
+
+try:
+    with Peer(peer_addr, torrent, peer_id) as peer:
+        # Start keep-alive thread
+        keep_alive_thread = threading.Thread(
+            target=keep_alive_loop,
+            args=(peer, 120, stop_event),
+            daemon=True
+        )
+        keep_alive_thread.start()
+        
+        # Do your work with the peer
+        peer.read_all()
+        sleep(300)  # Keep connection for 5 minutes
+        
+finally:
+    # Signal thread to stop
+    stop_event.set()
+```
+
 ### Metadata Download (BEP 9)
 
 Download torrent metadata from peers when you only have the info_hash (e.g., from magnet links):
 
 ```python
-from torrentlib import Torrent, Peer
-
-# Create minimal torrent with only info_hash
-torrent = Torrent(
-    info_hash="1234567890abcdef1234567890abcdef12345678"
-)
-
-peer_id = "-robots-testing12345"
-peer_addr = ('192.168.1.100', 6881)
-
 with Peer(peer_addr, torrent, peer_id) as peer:
     # Request all metadata pieces
     peer.request_all_metadata()
@@ -239,19 +265,6 @@ with Peer(peer_addr, torrent, peer_id) as peer:
 ### Complete Example: Magnet Link to File List
 
 ```python
-from torrentlib import Torrent, Peer, TorrentStatus
-from torrentlib.Tracker import Query
-
-# 1. Parse magnet link (simplified - extract info_hash)
-info_hash = "1234567890abcdef1234567890abcdef12345678"
-
-# 2. Create minimal torrent
-torrent = Torrent(info_hash=info_hash)
-
-# 3. Query tracker for peers
-tracker_url = "udp://tracker.opentrackr.org:1337/announce"
-peer_id = "-robots-testing12345"
-
 response = Query.single(
     info_hash=info_hash,
     url=tracker_url,
